@@ -5,7 +5,7 @@
 |---|---|
 | Claude Code | アーキテクチャ、コアAPI設計、閾値アルゴリズム、レビュー/エッジケース検討、PRレビュー |
 | Codex | スキャフォールド、CLI、エクスポータ、テストの高速実装 |
-| ひかり bot | レビューUIフロントエンド（HTMX/Jinja2 or React） |
+| ひかり bot | レビューUIフロントエンド（Vite + React + TypeScript、ビルド済み静的ファイルを FastAPI から配信） |
 | つち bot | ストレージ・HTTP APIバックエンド、パッケージング |
 | かぜ bot | CI、GitHub Actions、PyPIリリース |
 | オーナー（inatani） | open-questions の意思決定、最終レビュー、dogfood |
@@ -29,7 +29,7 @@ git worktree add ../hil-ci       -b feat/ci          # かぜ
 | Claude Code | アーキ文書(docs/architecture.md)、型定義・Storeプロトコル・OpenAPI確定、`@review` デコレータ設計（sync/async, fail-open）、judge インターフェース |
 | Codex | uv/hatchling スキャフォールド、Typer CLI骨格（ui/serve/export/tune）、pytest基盤・fixtures |
 | つち | SQLite Store実装（SQLModel）、blob保存（sha256）、マイグレーション方針 |
-| ひかり | UIワイヤーフレーム、キュー一覧画面（モックデータ） |
+| ひかり | Vite+React+TS 雛形（`ui/`）、UIワイヤーフレーム、キュー一覧画面（モックデータ） |
 | かぜ | GitHub Actions（lint: ruff, type: mypy/pyright, test: 3.10–3.13 マトリクス）、pre-commit |
 **マイルストーン M1**: `@review` で SQLite に低信頼度アイテムが入る。CI緑。
 
@@ -40,19 +40,22 @@ git worktree add ../hil-ci       -b feat/ci          # かぜ
 | Codex | エクスポータ jsonl / openai-ft / eval-set、`hil-eval export`/`tune` CLI、テスト拡充 |
 | つち | FastAPI: `/v1/items` CRUD、review、APIキー認証、画像配信、`hil-eval serve` |
 | ひかり | 詳細画面（画像/テキスト/JSONフォーム編集/diff）、Approve/Edit/Reject、ショートカット |
-| かぜ | wheel に UI 静的資産同梱の検証、TestPyPI 公開ワークフロー（trusted publishing） |
+| かぜ | CI で `vite build`→wheel に UI 静的資産同梱の検証、TestPyPI 公開ワークフロー（trusted publishing） |
 **マイルストーン M2**: UIでレビュー→修正→JSONLエクスポートまで E2E で動く。
 
 ## Week 3: dogfood・仕上げ・リリース
 | 担当 | タスク |
 |---|---|
-| Claude Code | diet-mcp 連携設計（sidecar案）、全体コードレビュー、README/クイックスタート監修 |
-| Codex | examples/（text LLM, VLM画像）、diet-mcp 用 TS 送信スニペット、カバレッジ80%到達 |
-| つち | Fly.io 上 sidecar 構成（Volume, Dockerfile）、パッケージメタデータ |
+| Claude Code | 全体コードレビュー、README/クイックスタート監修 |
+| Codex | examples/（text LLM, VLM画像）、カバレッジ80%到達 |
+| つち | パッケージメタデータ、`hil-eval serve` のドキュメント |
 | ひかり | UI磨き込み、Playwright E2E 最小、スクリーンショット/GIF（README用） |
-| かぜ | v0.1.0 PyPI リリース、リリースノート自動化、バッジ |
-**マイルストーン M3**: `pip install hil-eval` 公開、diet-mcp の1週間分データで tune 実行、成果を記事化。
+| かぜ | v0.1.0 PyPI リリース＋GitHubリポジトリ public 化、リリースノート自動化、バッジ |
+**マイルストーン M3**: `pip install hil-eval` 公開、リポジトリ public 化（v0.1.0）。
+
+## MVP後
+- diet-mcp dogfooding（HTTP sidecar を Fly.io、Volume, Dockerfile、TS 送信スニペット）、1週間分データで tune 実行、成果を記事化
 
 ## リスク対応 / バッファ
-- 各週金曜は統合・バッファ。遅延時は HF形式、TSクライアント、React版UIを削る
+- 各週金曜は統合・バッファ。遅延時は HF形式、TSクライアント、UIの磨き込み（diff表示・ショートカット）を削る
 - 契約変更は Claude Code の承認必須（ADRを docs/adr/ に残す）

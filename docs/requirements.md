@@ -1,6 +1,6 @@
 # hil-eval 要件定義（ドラフト v0.1）
 
-> 仮称 `hil-eval`。名称は open-questions.md Q1 参照。
+> 仮称 `hil-eval`（当面この名前で進める）。ライセンス: MIT。リポジトリは v0.1.0 リリース時に public 化。
 
 ## 1. 概要
 AI出力の評価に Human-in-the-Loop（HIL）レビューを「数行で」追加できる Python OSS フレームワーク。
@@ -100,9 +100,9 @@ hil-eval serve --api-key $KEY      # HTTP API のみ（sidecar用）
 ```
 
 ## 7. 技術選定
-- Python 3.10+（Q3）、パッケージ管理 uv、ビルド hatchling
+- Python 3.10+（決定済み）、パッケージ管理 uv、ビルド hatchling
 - バックエンド: FastAPI + SQLModel(SQLAlchemy) + SQLite
-- UI: **推奨 HTMX + Jinja2（ビルド不要・wheel同梱が容易）**。代替: Vite+React をビルド済み静的ファイルとして同梱（Q4）
+- UI: **React（決定済み, Q4）**: `ui/` に Vite + React + TypeScript のフロントエンドを置き、`vite build` の静的ファイルを wheel に同梱して FastAPI（StaticFiles）から配信。エンドユーザーに Node は不要
 - テスト: pytest, Playwright（UI E2E 最小限）
 
 ## 8. 閾値自動調整アルゴリズム v0
@@ -137,7 +137,7 @@ ThresholdHistory(id, project_id, old, new, n_samples, est_review_rate, est_miss_
 ## 11. 成功指標
 - 導入: README通りに `pip install` → 初レビューまで 5分以内、追加コード ≤ 5行
 - 品質: テストカバレッジ 80%+、CI緑、PyPI公開
-- 有効性（diet-mcp dogfood）: 閾値調整後、見逃し率 ≤5% を保ちつつレビュー率を固定閾値比 30%以上削減
+- 有効性（diet-mcp dogfood, MVP後に計測）: 閾値調整後、見逃し率 ≤5% を保ちつつレビュー率を固定閾値比 30%以上削減
 - 外部反応（3か月）: GitHub ★100、外部コントリビュータ1名以上、技術記事1本（Zenn/英語ブログ）
 
 ## 12. 競合比較
@@ -154,8 +154,10 @@ ThresholdHistory(id, project_id, old, new, n_samples, est_review_rate, est_miss_
 ※競合機能は2026年時点で要再確認。共存（エクスポートで取込）を打ち出す。
 
 ## 13. diet-mcp との連携（dogfooding）
+> **決定（Q5）: diet-mcp dogfooding は MVP 後（v0.1.0 リリース後）に実施。** 以下は MVP後の設計メモ。
+
 diet-mcp は TypeScript / Fly.io のため Python デコレータは直接使えない。
-- **案A（推奨・MVP）HTTP sidecar**: `hil-eval serve` を別 Fly アプリ（または同一マシンの別プロセス）で起動し、diet-mcp がカロリー推定後に `POST /v1/items` を fire-and-forget。信頼度は diet-mcp 側のLLM自己評価 or hil-eval 側 judge で算出
+- **案A（推奨・MVP後）HTTP sidecar**: `hil-eval serve` を別 Fly アプリ（または同一マシンの別プロセス）で起動し、diet-mcp がカロリー推定後に `POST /v1/items` を fire-and-forget。信頼度は diet-mcp 側のLLM自己評価 or hil-eval 側 judge で算出
 - 案B: ログ/JSONLをバッチ取込（`hil-eval import`）— 最小改修
 - 案C（MVP後）: 薄い TS クライアント `@hil-eval/client`（OpenAPIから生成）
 - 注意: Fly上のSQLiteは Volume 必須。画像を含むため個人データの扱い（ローカル限定・保持期間）を明記
@@ -166,6 +168,6 @@ diet-mcp は TypeScript / Fly.io のため Python デコレータは直接使え
 | 競合が同等機能を追加 | 差別化消失 | 「軽さ」「閾値自動調整」「VLM」に集中、エクスポートで共存 |
 | judge信頼度がキャリブレーションされていない | 振分精度低下 | audit_rate + 逆確率重み、v1でキャリブレーション |
 | スコープ膨張（3週超過） | 未完成 | 非ゴール厳守、HF形式/TSクライアントはstretch |
-| UIのwheel同梱が複雑化 | 配布難 | HTMX採用でビルド不要化 |
+| UIのwheel同梱が複雑化 | 配布難 | CIで `vite build` → `src/hil_eval/ui/static/` に出力し wheel 同梱を検証 |
 | 画像に個人情報 | 法的/信頼 | ローカル保存デフォルト、APIはキー必須、保持期間設定 |
 | 複数エージェント並行開発での衝突 | 手戻り | インターフェース先行確定・worktree分離・契約テスト |
