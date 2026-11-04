@@ -60,3 +60,15 @@ reuses video_ts as an optional offset in seconds and the existing Range-capable
 blob route. HF Parquet adds an audio list<binary> column alongside images;
 include_images=False omits bytes from both columns. OpenAI image export behavior
 is unchanged.
+
+## v0.1.1 asset selectors and exports
+
+`review(assets=...)`/`submit(assets=...)` take path selectors (`root.key[*].leaf`);
+roots are argument names (or `input` for submit) and `output`. `images=` is an alias
+for argument roots. Selected values are stored together with implicitly detected
+media in one document-order pass; `AssetRef.order` is a per-role counter, so list
+position (e.g. search rank) is preserved. Markers may add `filename` next to
+`$asset`; readers must key on `$asset` only. JSONL/eval-set exports expand markers
+with sha256/mime/filename/path/url; AssetRef, the Store protocol and the HTTP API
+are unchanged. `route="all"` records `routed_by=audit` rather than adding a new
+RoutedBy value, because routing every call is an unbiased sample.

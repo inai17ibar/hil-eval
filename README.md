@@ -42,8 +42,27 @@ storage failures are logged and never break your app (fail-open). Async function
 - Audio bytes and existing audio `Path` inputs are captured automatically. WAV, MP3
   (ID3 or MPEG frame sync), FLAC, Ogg, and AIFF are detected by signature; file
   extensions are a fallback. Plain string paths require `images=["argument"]`.
+- `assets=[...]` marks media anywhere in arguments **or the return value** with
+  selectors: `"audio"` (argument), `"output.audio"`, `"output[*].path"`,
+  `"output.results[*].path"` (`[*]` maps lists, `[N]` indexes; missing keys are
+  skipped). Selected string paths become assets without converting to `Path`, and
+  each asset's `order` follows list position, so UI and Parquet order match rank.
+  `images=` remains as a backward-compatible alias.
+- `name="search_text"` overrides the recorded `fn_name` (useful for closures,
+  whose `__qualname__` contains `<locals>`).
+- `route="all"` queues every call (recorded as `routed_by=audit`, so it also
+  serves as an unbiased tuning sample); the default `route="confidence"` keeps
+  threshold + audit routing.
 - `audit_rate` routes a random fraction of high-confidence items for unbiased tuning.
-- `hil.submit(input=..., output=..., confidence=...)` enqueues an item manually.
+- `hil.submit(input=..., output=..., confidence=...)` enqueues an item manually;
+  it accepts the same `assets=` selectors (rooted at `input` or `output`) and `name=`.
+
+```python
+@hil.review(judge=score_judge, route="all", name="search_text",
+            assets=["output[*].path"])
+def search(query: str, k: int = 5) -> list[dict]:
+    return [{"rank": i + 1, "path": str(p)} for i, p in enumerate(find(query, k))]
+```
 
 Supply choice labels with `options` for choice review:
 
@@ -104,7 +123,15 @@ hil-eval export --project demo --format eval-set --no-images -o eval.jsonl
 Exports default to approved and corrected items using each item's latest review.
 OpenAI fine-tuning exports embed input images as data URLs; `--no-images` omits
 those images. `-o -` writes to stdout. In Python, `hil.export(fmt="eval-set")`
-returns an iterator of records using the project and store from `hil.init()`.
+returns an iterator of records using the project and store from `hil.init()`;
+`hil.export_to("reviews.jsonl", format="jsonl")` writes a file in any CLI format
+(`jsonl`, `openai-ft`, `eval-set`, `hf`) and returns the record count.
+
+In `jsonl` and `eval-set` records, asset markers are expanded to
+`{"$asset": sha, "sha256": sha, "mime": "audio/wav", "filename": "kick.wav",
+"path": "<local blob path>", "url": "/v1/blobs/<sha>"}` (the URL is relative to
+the review server). `hf` (Parquet) needs the extra: `pip install 'hil-eval[hf]'`;
+a missing extra fails before anything is written.
 
 ## Tune thresholds
 
