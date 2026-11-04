@@ -31,6 +31,43 @@ def _asset_ref(value: Any) -> bool:
     return isinstance(value, dict) and "$asset" in value
 
 
+HF_INSTALL_HINT = (
+    "Parquet export (format 'hf') requires pyarrow, which ships with the [hf] extra: "
+    "pip install 'hil-eval[hf]'  (uv: uv add 'hil-eval[hf]')"
+)
+FORMATS = ("jsonl", "openai-ft", "eval-set", "hf")
+
+
+def require_pyarrow() -> None:
+    """Fail fast with an install hint when the optional [hf] extra is missing."""
+    try:
+        import pyarrow  # noqa: F401
+        import pyarrow.parquet  # noqa: F401
+    except ImportError as exc:
+        raise ImportError(HF_INSTALL_HINT) from exc
+
+
+def _resolve_assets(value: Any, refs: dict[str, Any], store: Store) -> Any:
+    """Expand ``{"$asset": sha}`` markers into self-describing references."""
+    if isinstance(value, dict):
+        sha = value.get("$asset")
+        if isinstance(sha, str):
+            ref = refs.get(sha)
+            path = store.get_blob_path(sha)
+            return {
+                **value,
+                "sha256": sha,
+                "mime": ref.mime if ref is not None else None,
+                "filename": value.get("filename"),
+                "path": str(path) if path is not None else None,
+                "url": f"/v1/blobs/{sha}",
+            }
+        return {k: _resolve_assets(v, refs, store) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_resolve_assets(v, refs, store) for v in value]
+    return value
+
+
 def export_items(
     store: Store,
     project: str,
@@ -39,7 +76,13 @@ def export_items(
     statuses: Iterable[Status | str] = (Status.approved, Status.corrected),
     include_images: bool = True,
 ) -> Iterator[dict[str, Any]]:
-    """Export selected statuses; missing image blobs raise rather than lose data."""
+    """Export selected statuses; missing image blobs raise rather than lose data.
+
+    jsonl and eval-set expand ``{"$asset": sha}`` markers with sha256, mime,
+    filename, local blob path and the server's blob URL.
+    """
+    if fmt == "hf":
+        raise ValueError("format 'hf' writes Parquet; use hil.export_to(path, format='hf')")
     if fmt not in {"jsonl", "openai-ft", "eval-set"}:
         raise ValueError(f"unknown export format: {fmt!r}")
     selected = {Status(s) for s in statuses}
@@ -61,18 +104,28 @@ def export_items(
             "reason_text": review.reason_text,
             "choice": review.choice,
         }
+        if fmt in ("jsonl", "eval-set"):
+            refs = {a.sha256: a for a in item.assets}
+
+            def resolve(value, refs=refs):
+                return _resolve_assets(value, refs, store)
+
         if fmt == "jsonl":
             yield {
                 **metadata,
                 "fn_name": item.fn_name,
-                "input": item.input,
-                "output": item.output,
-                "corrected_output": expected,
+                "input": resolve(item.input),
+                "output": resolve(item.output),
+                "corrected_output": resolve(expected),
                 "judge_reason": item.judge_reason,
                 "created_at": item.created_at.isoformat(),
             }
         elif fmt == "eval-set":
-            yield {"input": item.input, "expected": expected, "metadata": metadata}
+            yield {
+                "input": resolve(item.input),
+                "expected": resolve(expected),
+                "metadata": metadata,
+            }
         else:
             content: list[dict[str, Any]] = [
                 {"type": "text", "text": _text(_without_assets(item.input))}
@@ -100,15 +153,19 @@ def export_items(
             }
 
 
-def write_jsonl(records: Iterable[dict[str, Any]], path: str | Path = "-") -> None:
-    """Write UTF-8 JSONL, leaving stdout open when path is '-'."""
+def write_jsonl(records: Iterable[dict[str, Any]], path: str | Path = "-") -> int:
+    """Write UTF-8 JSONL, leaving stdout open when path is '-'; return the record count."""
+    count = 0
     if str(path) == "-":
         for record in records:
             print(json.dumps(record, ensure_ascii=False), file=sys.stdout)
+            count += 1
     else:
         with Path(path).open("w", encoding="utf-8") as stream:
             for record in records:
                 stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+                count += 1
+    return count
 
 
 def export_hf(
@@ -118,13 +175,12 @@ def export_hf(
     *,
     statuses=(Status.approved, Status.corrected),
     include_images=True,
-) -> None:
+) -> int:
     """Write reviewed JSONL-shaped records and image/audio bytes as Parquet."""
-    try:
-        import pyarrow as pa
-        import pyarrow.parquet as pq
-    except ImportError as exc:
-        raise ImportError("Parquet export requires pyarrow; pip install hil-eval[hf]") from exc
+    require_pyarrow()
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
     rows = list(export_items(store, project, statuses=statuses, include_images=include_images))
     images = []
     audio = []
@@ -201,3 +257,26 @@ def export_hf(
     table = table.append_column("images", pa.array(images, type=pa.list_(pa.binary())))
     table = table.append_column("audio", pa.array(audio, type=pa.list_(pa.binary())))
     pq.write_table(table, path)
+    return len(rows)
+
+
+def export_to(
+    store: Store,
+    project: str,
+    path: str | Path,
+    *,
+    format: str = "jsonl",
+    statuses: Iterable[Status | str] = (Status.approved, Status.corrected),
+    include_images: bool = True,
+) -> int:
+    """Write an export file in any CLI format; return the number of records."""
+    if format not in FORMATS:
+        raise ValueError(f"unknown export format: {format!r}; choose one of {', '.join(FORMATS)}")
+    if format == "hf":
+        if str(path) == "-":
+            raise ValueError("format 'hf' requires a real file path")
+        return export_hf(store, project, path, statuses=statuses, include_images=include_images)
+    return write_jsonl(
+        export_items(store, project, fmt=format, statuses=statuses, include_images=include_images),
+        path,
+    )

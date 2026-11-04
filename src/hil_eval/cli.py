@@ -15,7 +15,7 @@ else:
     except ImportError:
         typer = None
 
-from .exporters import export_hf, export_items, write_jsonl
+from .exporters import export_hf, export_items, require_pyarrow, write_jsonl
 from .store.sqlite import SQLiteStore
 from .tuning import apply_tuning, recommend_threshold
 from .types import Status
@@ -114,6 +114,10 @@ if app is not None:
         if fmt == "hf":
             if output == "-":
                 raise typer.BadParameter("hf requires a real --output path", param_hint="--output")
+            try:
+                require_pyarrow()
+            except ImportError as exc:
+                raise typer.BadParameter(str(exc), param_hint="--format") from exc
             try:
                 export_hf(
                     SQLiteStore(db or ctx.obj),
