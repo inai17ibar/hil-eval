@@ -6,11 +6,13 @@ export function AssetPreview({ asset }: { asset: Asset }) {
     width: asset.width ?? 0,
     height: asset.height ?? 0,
   });
-  if (asset.mime.startsWith("video/"))
+  if (asset.mime.startsWith("audio/") || asset.mime.startsWith("video/")) {
+    const Media = asset.mime.startsWith("audio/") ? "audio" : "video";
     return (
-      <video
+      <Media
         className="asset"
         controls
+        preload="metadata"
         src={imageUrl(asset.sha256)}
         onLoadedMetadata={(e) => {
           if (asset.video_ts !== null)
@@ -21,6 +23,7 @@ export function AssetPreview({ asset }: { asset: Asset }) {
         }}
       />
     );
+  }
   return (
     <div className="image-frame">
       <img

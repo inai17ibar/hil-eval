@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from ..blobs import sniff_mime
+from ..blobs import detect_mime, sniff_mime
 from ..store import ItemNotFoundError, ItemSupersededError
 from ..types import (
     AssetRef,
@@ -470,7 +470,7 @@ def create_app(
         for order, upload in enumerate(body.assets or []):
             data = base64.b64decode(upload.data_base64, validate=True)
             digest = hashlib.sha256(data).hexdigest()
-            mime = upload.mime or sniff_mime(data)
+            mime = upload.mime or detect_mime(data, upload.filename)
             item.assets.append(
                 AssetRef(
                     digest,

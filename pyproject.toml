@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hil-eval"
-version = "0.1.0"
+version = "0.1.1"
 description = "Add human-in-the-loop review of AI outputs in a few lines"
 readme = "README.md"
 license = "MIT"

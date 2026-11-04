@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from .blobs import is_image, store_image
+from .blobs import is_asset, store_image
 from .store.sqlite import SQLiteStore
 from .types import AssetRole, Item, Judgment, RoutedBy, Status, validate_unit
 
@@ -68,13 +68,13 @@ class Client:
             try:
                 asset = store_image(value, self.store, role=role)
             except Exception as exc:  # keep the item; record why the asset is missing
-                logger.warning("Could not store image asset: %s", exc)
+                logger.warning("Could not store media asset: %s", exc)
                 return {"$asset_error": f"{type(exc).__name__}: {exc}"}
             assets.append(asset)
             return {"$asset": asset.sha256}
 
         def capture(value, role):
-            if is_image(value):
+            if is_asset(value):
                 return store_asset(value, role)
             if isinstance(value, dict):
                 return {k: capture(v, role) for k, v in value.items()}

@@ -119,7 +119,7 @@ def export_hf(
     statuses=(Status.approved, Status.corrected),
     include_images=True,
 ) -> None:
-    """Write reviewed JSONL-shaped records and image bytes as Parquet."""
+    """Write reviewed JSONL-shaped records and image/audio bytes as Parquet."""
     try:
         import pyarrow as pa
         import pyarrow.parquet as pq
@@ -127,18 +127,23 @@ def export_hf(
         raise ImportError("Parquet export requires pyarrow; pip install hil-eval[hf]") from exc
     rows = list(export_items(store, project, statuses=statuses, include_images=include_images))
     images = []
+    audio = []
     for row in rows:
         item = store.get_item(row["id"])
         blobs = []
+        audio_blobs = []
         if include_images and item is not None:
             for asset in sorted(item.assets, key=lambda a: a.order):
-                if not asset.mime.startswith("image/"):
+                if not asset.mime.startswith(("image/", "audio/")):
                     continue
                 blob = store.get_blob_path(asset.sha256)
                 if blob is None:
-                    raise FileNotFoundError(f"Missing image blob: {asset.sha256}")
-                blobs.append(blob.read_bytes())
+                    raise FileNotFoundError(f"Missing media blob: {asset.sha256}")
+                (audio_blobs if asset.mime.startswith("audio/") else blobs).append(
+                    blob.read_bytes()
+                )
         images.append(blobs)
+        audio.append(audio_blobs)
 
     # Native Arrow columns preserve ordinary JSON values. Empty objects and
     # mixed JSON types cannot be represented by Parquet; only those columns
@@ -194,4 +199,5 @@ def export_hf(
             {b"hil_eval.json_columns": json.dumps(json_columns).encode()}
         )
     table = table.append_column("images", pa.array(images, type=pa.list_(pa.binary())))
+    table = table.append_column("audio", pa.array(audio, type=pa.list_(pa.binary())))
     pq.write_table(table, path)

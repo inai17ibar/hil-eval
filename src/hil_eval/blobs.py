@@ -37,7 +37,7 @@ def _is_video_bytes(data: bytes) -> bool:
 
 
 def sniff_mime(data: bytes) -> str:
-    """Guess an image mime type from magic bytes; used where no filename/extension
+    """Guess a media mime type from magic bytes; used where no filename/extension
     is available (e.g. the flat, content-addressed blob store)."""
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
@@ -51,7 +51,41 @@ def sniff_mime(data: bytes) -> str:
         return "video/webm"
     if data[4:8] == b"ftyp":
         return "video/mp4"
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "audio/wav"
+    if data.startswith(b"ID3") or (len(data) >= 2 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0):
+        return "audio/mpeg"
+    if data.startswith(b"fLaC"):
+        return "audio/flac"
+    if data.startswith(b"OggS"):
+        return "audio/ogg"
+    if data[:4] == b"FORM" and data[8:12] == b"AIFF":
+        return "audio/aiff"
     return "application/octet-stream"
+
+
+def detect_mime(data: bytes, filename: str | None = None) -> str:
+    """Prefer signatures, falling back to the filename for unknown formats."""
+    mime = sniff_mime(data)
+    if mime != "application/octet-stream":
+        return mime
+    return (mimetypes.guess_type(filename)[0] if filename else None) or mime
+
+
+def is_asset(value) -> bool:
+    """Detect media bytes and existing media Paths, keeping plain strings as text."""
+    if isinstance(value, (bytes, bytearray)):
+        return sniff_mime(bytes(value)).startswith(("image/", "video/", "audio/"))
+    if isinstance(value, Path):
+        if not value.is_file():
+            return False
+        try:
+            with value.open("rb") as stream:
+                header = stream.read(16)
+        except OSError:
+            header = b""
+        return detect_mime(header, str(value)).startswith(("image/", "video/", "audio/"))
+    return is_image(value)
 
 
 def is_image(value) -> bool:
@@ -76,7 +110,7 @@ def store_asset(
 
         client = get_client()
         if client is None:
-            raise RuntimeError("hil.init() is required before storing images")
+            raise RuntimeError("hil.init() is required before storing assets")
         store = client.store
     width = height = None
     if isinstance(image, (bytes, bytearray)):
@@ -84,14 +118,14 @@ def store_asset(
         mime = sniff_mime(data)
     elif isinstance(image, (str, Path)):
         if str(image).startswith(("http://", "https://")):
-            raise NotImplementedError("Image URLs are not supported in Milestone 1")
+            raise NotImplementedError("Media URLs are not supported in Milestone 1")
         data = Path(image).read_bytes()
-        mime = mimetypes.guess_type(str(image))[0] or sniff_mime(data)
+        mime = detect_mime(data, str(image))
     else:
         from PIL import Image
 
         if not isinstance(image, Image.Image):
-            raise TypeError("Expected image bytes, path, or PIL.Image.Image")
+            raise TypeError("Expected media bytes, path, or PIL.Image.Image")
         stream = io.BytesIO()
         image.save(stream, format="PNG")
         data = stream.getvalue()

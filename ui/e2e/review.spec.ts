@@ -77,3 +77,21 @@ test("selection updates the URL and browser history restores the selection", asy
   await page.goBack();
   await expect(page.locator("article")).toContainText(first.id);
 });
+
+test("seed audio has a playable WAV source", async ({ page, request }) => {
+  await page.goto("/items/seed-example");
+  const audio = page.locator("article audio");
+  await expect(audio).toBeVisible();
+  await expect(audio).toHaveAttribute("preload", "metadata");
+  const src = await audio.getAttribute("src");
+  expect(src).toBeTruthy();
+  const response = await request.get(src!);
+  expect(response.status()).toBe(200);
+  expect(response.headers()["content-type"]).toBe("audio/wav");
+  await expect
+    .poll(() => audio.evaluate((el) => (el as HTMLAudioElement).readyState))
+    .toBeGreaterThanOrEqual(1);
+  await expect
+    .poll(() => audio.evaluate((el) => (el as HTMLAudioElement).currentTime))
+    .toBeGreaterThanOrEqual(0.25);
+});

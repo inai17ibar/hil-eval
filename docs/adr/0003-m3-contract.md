@@ -48,3 +48,15 @@ numeric decorator threshold overrides both tag and project configuration.
 Review and supersede operations acquire a SQLite write transaction before reading
 item state. save_review raises ItemSupersededError for terminal superseded items;
 the HTTP boundary maps this conflict to 409 without inserting a review.
+
+## v0.1.1 audio extension
+
+Assets also accept audio paths/bytes and base64 uploads, without changing
+AssetRef or the Store protocol. WAV (RIFF/WAVE), MP3 (ID3 or MPEG frame sync),
+FLAC, Ogg, and AIFF (FORM/AIFF) use signature detection before filename fallback.
+Implicit capture includes media bytes and existing media Path objects; string
+paths still require the decorator's explicit images argument. Audio playback
+reuses video_ts as an optional offset in seconds and the existing Range-capable
+blob route. HF Parquet adds an audio list<binary> column alongside images;
+include_images=False omits bytes from both columns. OpenAI image export behavior
+is unchanged.

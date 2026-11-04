@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { AssetPreview } from "./AssetPreview";
+import { describe, it, expect, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ReviewControls } from "./ReviewControls";
 import { JsonForm, emptyValue } from "./JsonForm";
@@ -139,5 +140,31 @@ describe("review regression controls", () => {
     });
     expect(result).toBeNull();
     expect(error).toBe("Enter valid JSON");
+  });
+});
+
+vi.mock("./api", () => ({ imageUrl: (sha: string) => `/v1/blobs/${sha}` }));
+
+describe("audio assets", () => {
+  it("renders a playable audio control with metadata preload", () => {
+    const html = renderToStaticMarkup(
+      <AssetPreview
+        asset={{
+          sha256: "audio-hash",
+          mime: "audio/wav",
+          role: "input",
+          order: 0,
+          video_ts: 0.25,
+          bbox: null,
+          width: null,
+          height: null,
+          url: "/v1/blobs/audio-hash",
+        }}
+      />,
+    );
+    expect(html).toContain("<audio");
+    expect(html).toContain('controls=""');
+    expect(html).toContain('preload="metadata"');
+    expect(html).toContain('src="/v1/blobs/audio-hash"');
   });
 });

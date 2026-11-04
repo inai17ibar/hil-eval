@@ -18,9 +18,9 @@ def review(
     judge: ``(arguments: dict, output) -> Judgment | float``; receives all bound
         arguments (``self``/``cls`` excluded).
     inputs: optional whitelist of argument names to *store* (default: all).
-    images: argument names whose values are images (path str/Path, bytes, PIL).
-        Bytes with an image signature, PIL images and existing image ``Path`` objects
-        are detected automatically; plain strings are only treated as images here.
+    images: argument names whose values are media assets (path str/Path, bytes, PIL).
+        Bytes with an image/video/audio signature, PIL images and existing media ``Path`` objects
+        are detected automatically; plain strings are only treated as assets here.
     """
     if threshold != "auto":
         validate_unit("threshold", threshold)

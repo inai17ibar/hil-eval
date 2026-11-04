@@ -38,7 +38,10 @@ The decorated function's return value is always passed through unchanged; judge 
 storage failures are logged and never break your app (fail-open). Async functions work too.
 
 - `threshold="auto"` uses the project's stored threshold (falls back to 0.8).
-- `images=["image"]` marks arguments as images (paths, bytes, PIL) stored by SHA-256.
+- `images=["image"]` explicitly marks media arguments (string paths, bytes, PIL) stored by SHA-256.
+- Audio bytes and existing audio `Path` inputs are captured automatically. WAV, MP3
+  (ID3 or MPEG frame sync), FLAC, Ogg, and AIFF are detected by signature; file
+  extensions are a fallback. Plain string paths require `images=["argument"]`.
 - `audit_rate` routes a random fraction of high-confidence items for unbiased tuning.
 - `hil.submit(input=..., output=..., confidence=...)` enqueues an item manually.
 
@@ -141,3 +144,11 @@ an isolated temporary database server on port 8799. CI runs these suites and
 validates workflow syntax with actionlint. The TestPyPI workflow is triggered by
 `v*` tags or manually, uses the `testpypi` environment and OIDC trusted publishing
 (no API token); configure that trusted publisher on TestPyPI before releasing.
+
+Audio assets can also be uploaded in `POST /v1/items` using
+`assets: [{"data_base64": "...", "filename": "clip.wav", "video_ts": 1.5}]`.
+The review UI provides audio controls with metadata preload; `video_ts` is the
+optional starting offset in seconds for both audio and video. Blob URLs serve
+the detected audio content type and support HTTP Range requests.
+HF Parquet exports include ordered audio bytes in an `audio` list alongside
+the existing `images` list; `--no-images` omits both lists' media bytes.
