@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
 import hmac
+import math
 import re
+from contextlib import asynccontextmanager
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
@@ -10,18 +16,21 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..blobs import sniff_mime
 from ..store import ItemNotFoundError
 from ..types import (
     AssetRef,
+    AssetRole,
     Item,
     ProjectConfig,
+    ReasonCode,
     Review,
     ReviewAction,
     RoutedBy,
     Status,
+    TagThreshold,
     validate_unit,
 )
 
@@ -33,6 +42,9 @@ def _serialize_asset(asset: AssetRef) -> dict:
         "sha256": asset.sha256,
         "role": asset.role.value,
         "mime": asset.mime,
+        "order": asset.order,
+        "video_ts": asset.video_ts,
+        "bbox": asset.bbox,
         "width": asset.width,
         "height": asset.height,
         "url": f"/v1/blobs/{asset.sha256}",
@@ -56,6 +68,8 @@ def _serialize_item(item: Item, *, reviews: list[Review] | None = None) -> dict:
         "trace_id": item.trace_id,
         "created_at": item.created_at.isoformat(),
         "assets": [_serialize_asset(a) for a in item.assets],
+        "options": item.options,
+        "expires_at": item.expires_at.isoformat() if item.expires_at else None,
     }
     if reviews is not None:
         data["reviews"] = [_serialize_review(r) for r in reviews]
@@ -71,6 +85,9 @@ def _serialize_review(review: Review) -> dict:
         "corrected_output": review.corrected_output,
         "judge_correct": review.judge_correct,
         "note": review.note,
+        "choice": review.choice,
+        "reason_codes": review.reason_codes,
+        "reason_text": review.reason_text,
         "created_at": review.created_at.isoformat(),
     }
 
@@ -84,6 +101,65 @@ def _serialize_project(project: ProjectConfig) -> dict:
     }
 
 
+class AssetUpload(BaseModel):
+    data_base64: str
+    mime: str | None = None
+    role: AssetRole = AssetRole.input
+    filename: str | None = None
+    video_ts: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    bbox: list[float] | None = None
+
+    @field_validator("data_base64")
+    @classmethod
+    def _base64(cls, value):
+        try:
+            base64.b64decode(value, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError("invalid base64 asset") from exc
+        return value
+
+    @field_validator("bbox")
+    @classmethod
+    def _bbox(cls, value):
+        if value is not None and (
+            len(value) != 4 or any(not math.isfinite(v) or v < 0 for v in value)
+        ):
+            raise ValueError("bbox must contain finite nonnegative [x,y,w,h]")
+        return value
+
+
+class SupersedeRequest(BaseModel):
+    project: str
+    trace_id: str | None = None
+    tag_key: str | None = None
+    tag_value: str | None = None
+
+    @model_validator(mode="after")
+    def _selector(self):
+        if (self.tag_key is None) != (self.tag_value is None):
+            raise ValueError("tag_key and tag_value must be supplied together")
+        if self.trace_id is None and self.tag_key is None:
+            raise ValueError("trace_id or tag is required")
+        return self
+
+
+class ReasonCodeRequest(BaseModel):
+    code: str
+    label: str | None = None
+    polarity: str | None = None
+
+
+class TagThresholdRequest(BaseModel):
+    tag_key: str
+    tag_value: str
+    threshold: float
+
+    @field_validator("threshold", mode="before")
+    @classmethod
+    def _threshold(cls, value):
+        return validate_unit("threshold", value)
+
+
 class CreateItemRequest(BaseModel):
     project: str
     input: Any
@@ -94,6 +170,16 @@ class CreateItemRequest(BaseModel):
     tags: dict[str, str] | None = None
     trace_id: str | None = None
     fn_name: str | None = None
+    options: list[Any] | None = None
+    expires_at: datetime | None = None
+    assets: list[AssetUpload] | None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def _expiry(cls, value):
+        if value is not None and value.tzinfo is None:
+            raise ValueError("expires_at must have a timezone")
+        return value
 
     @field_validator("confidence", mode="before")
     @classmethod
@@ -103,6 +189,9 @@ class CreateItemRequest(BaseModel):
 
 class ReviewRequest(BaseModel):
     action: ReviewAction
+    choice: Any = None
+    reason_codes: list[str] = Field(default_factory=list)
+    reason_text: str | None = None
     corrected_output: Any = None
     judge_correct: bool | None = None
     reviewer: str | None = None
@@ -112,11 +201,33 @@ class ReviewRequest(BaseModel):
     def _check_corrected_output(self):
         if self.action == ReviewAction.edit and self.corrected_output is None:
             raise ValueError("corrected_output is required when action is 'edit'")
+        if self.action == ReviewAction.choose and "choice" not in self.model_fields_set:
+            raise ValueError("choice is required when action is choose")
         return self
 
 
-def create_app(store, api_key: str | None = None, static_dir: str | Path | None = None) -> FastAPI:
-    app = FastAPI(title="hil-eval")
+def create_app(
+    store,
+    api_key: str | None = None,
+    static_dir: str | Path | None = None,
+    *,
+    webhook_url: str | None = None,
+    webhook_secret: str | None = None,
+) -> FastAPI:
+    from ..webhooks import WebhookDispatcher
+
+    dispatcher = WebhookDispatcher(webhook_url, webhook_secret)
+
+    @asynccontextmanager
+    async def lifespan(app):
+        dispatcher.start()
+        try:
+            yield
+        finally:
+            dispatcher.stop()
+
+    app = FastAPI(title="hil-eval", lifespan=lifespan)
+    app.state.webhook_dispatcher = dispatcher
 
     def _key_matches(provided: str | None) -> bool:
         return (
@@ -150,7 +261,9 @@ def create_app(store, api_key: str | None = None, static_dir: str | Path | None 
         max_confidence: Annotated[float | None, Query(ge=0.0, le=1.0)] = None,
         limit: Annotated[int, Query(ge=1)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
+        include_expired: bool = False,
     ):
+        now = datetime.now(timezone.utc)
         items = store.list_items(
             project,
             status=status,
@@ -159,11 +272,50 @@ def create_app(store, api_key: str | None = None, static_dir: str | Path | None 
             limit=limit,
             offset=offset,
             order="desc",
+            exclude_expired=not include_expired,
+            now=now,
         )
         total = store.count_items(
-            project, status=status, min_confidence=min_confidence, max_confidence=max_confidence
+            project,
+            status=status,
+            min_confidence=min_confidence,
+            max_confidence=max_confidence,
+            exclude_expired=not include_expired,
+            now=now,
         )
         return {"items": [_serialize_item(i) for i in items], "total": total}
+
+    @app.post("/v1/items/supersede", dependencies=[Depends(require_api_key)])
+    def supersede(body: SupersedeRequest):
+        tag = (body.tag_key, body.tag_value) if body.tag_key is not None else None
+        return {"superseded": store.supersede_items(body.project, trace_id=body.trace_id, tag=tag)}
+
+    @app.get("/v1/projects/{project}/reason-codes", dependencies=[Depends(require_api_key)])
+    def reason_codes(project: str):
+        return [asdict(r) for r in store.list_reason_codes(project)]
+
+    @app.post("/v1/projects/{project}/reason-codes", dependencies=[Depends(require_api_key)])
+    def register_reason(project: str, body: ReasonCodeRequest):
+        entry = ReasonCode(project=project, **body.model_dump())
+        store.register_reason_code(entry)
+        return asdict(entry)
+
+    @app.get("/v1/projects/{project}/threshold", dependencies=[Depends(require_api_key)])
+    def get_threshold(project: str, tag: str | None = None):
+        config = store.get_project(project)
+        if config is None:
+            raise HTTPException(404, "project not found")
+        threshold = None
+        if tag is not None:
+            if ":" not in tag:
+                raise HTTPException(422, "tag must be key:value")
+            threshold = store.get_tag_threshold(project, *tag.split(":", 1))
+        return {"threshold": config.threshold if threshold is None else threshold}
+
+    @app.put("/v1/projects/{project}/threshold", dependencies=[Depends(require_api_key)])
+    def set_threshold(project: str, body: TagThresholdRequest):
+        store.set_tag_threshold(TagThreshold(project=project, **body.model_dump()))
+        return {"threshold": body.threshold}
 
     @app.get("/v1/items/{item_id}", dependencies=[Depends(require_api_key)])
     def get_item(item_id: str):
@@ -191,8 +343,27 @@ def create_app(store, api_key: str | None = None, static_dir: str | Path | None 
             trace_id=body.trace_id,
             created_at=datetime.now(timezone.utc),
             assets=[],
+            options=body.options,
+            expires_at=body.expires_at,
         )
-        return _serialize_item(store.save_item(item))
+        for order, upload in enumerate(body.assets or []):
+            data = base64.b64decode(upload.data_base64, validate=True)
+            digest = hashlib.sha256(data).hexdigest()
+            mime = upload.mime or sniff_mime(data)
+            item.assets.append(
+                AssetRef(
+                    digest,
+                    upload.role,
+                    mime,
+                    store.put_blob(digest, data, mime),
+                    order=order,
+                    video_ts=upload.video_ts,
+                    bbox=upload.bbox,
+                )
+            )
+        result = _serialize_item(store.save_item(item))
+        dispatcher.enqueue("item.created", store.get_project(item.project), result)
+        return result
 
     @app.delete("/v1/items/{item_id}", status_code=204, dependencies=[Depends(require_api_key)])
     def delete_item(item_id: str):
@@ -202,6 +373,14 @@ def create_app(store, api_key: str | None = None, static_dir: str | Path | None 
 
     @app.post("/v1/items/{item_id}/review", dependencies=[Depends(require_api_key)])
     def review_item(item_id: str, body: ReviewRequest):
+        item = store.get_item(item_id)
+        if item is None:
+            raise HTTPException(404, "item not found")
+        if body.action == ReviewAction.choose and item.options and body.choice not in item.options:
+            raise HTTPException(422, "choice must be one of item options")
+        registered = {r.code for r in store.list_reason_codes(item.project)}
+        if registered and set(body.reason_codes) - registered:
+            raise HTTPException(422, "unknown reason code")
         review = Review(
             id=uuid4().hex,
             item_id=item_id,
@@ -210,12 +389,18 @@ def create_app(store, api_key: str | None = None, static_dir: str | Path | None 
             corrected_output=body.corrected_output,
             judge_correct=body.judge_correct,
             note=body.note,
+            choice=body.choice,
+            reason_codes=body.reason_codes,
+            reason_text=body.reason_text,
             created_at=datetime.now(timezone.utc),
         )
         try:
             store.save_review(review)
         except ItemNotFoundError as exc:
             raise HTTPException(status_code=404, detail="item not found") from exc
+        dispatcher.enqueue(
+            "review.created", store.get_project(item.project), _serialize_review(review)
+        )
         return _serialize_item(store.get_item(item_id))
 
     @app.get("/v1/blobs/{sha256}", dependencies=[Depends(require_api_key_header_or_query)])

@@ -16,10 +16,12 @@ from ..types import (
     AssetRole,
     Item,
     ProjectConfig,
+    ReasonCode,
     Review,
     ReviewAction,
     RoutedBy,
     Status,
+    TagThreshold,
     ThresholdHistory,
     validate_unit,
 )
@@ -28,18 +30,21 @@ from .base import ItemNotFoundError
 _ACTION_TO_STATUS = {
     ReviewAction.approve: Status.approved,
     ReviewAction.edit: Status.corrected,
+    ReviewAction.choose: Status.corrected,
     ReviewAction.reject: Status.rejected,
     ReviewAction.skip: Status.skipped,
 }
 
 _T = TypeVar("_T")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _item_from_data(data: dict) -> Item:
     data = dict(data)
     data["created_at"] = datetime.fromisoformat(data["created_at"])
+    if data.get("expires_at") is not None:
+        data["expires_at"] = datetime.fromisoformat(data["expires_at"])
     data["status"] = Status(data["status"])
     data["routed_by"] = RoutedBy(data["routed_by"])
     data["assets"] = [AssetRef(**{**a, "role": AssetRole(a["role"])}) for a in data["assets"]]
@@ -87,8 +92,24 @@ class SQLiteStore:
         """)
         version = db.execute("PRAGMA user_version").fetchone()[0]
         if version < SCHEMA_VERSION:
-            self._migrate_to_v1(db)
+            if version < 1:
+                self._migrate_to_v1(db)
+            self._migrate_to_v2(db)
             db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+
+    def _migrate_to_v2(self, db):
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS reason_codes (project TEXT, code TEXT, "
+            "label TEXT, polarity TEXT, PRIMARY KEY(project, code))"
+        )
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS tag_thresholds (project TEXT, tag_key "
+            "TEXT, tag_value TEXT, threshold REAL, PRIMARY KEY(project, tag_key, tag_value))"
+        )
+        columns = [r[1] for r in db.execute("PRAGMA table_info(projects)")]
+        for name in ("webhook_url", "webhook_secret"):
+            if name not in columns:
+                db.execute(f"ALTER TABLE projects ADD COLUMN {name} TEXT")
 
     def _migrate_to_v1(self, db):
         # M1 databases predate the `confidence` column on `items` (added to support
@@ -122,7 +143,16 @@ class SQLiteStore:
                 time.sleep(delay)
         raise AssertionError("retry loop exhausted")
 
-    def ensure_project(self, name, *, threshold=None, target_miss_rate=None, audit_rate=None):
+    def ensure_project(
+        self,
+        name,
+        *,
+        threshold=None,
+        target_miss_rate=None,
+        audit_rate=None,
+        webhook_url=None,
+        webhook_secret=None,
+    ):
         for key, value in (
             ("threshold", threshold),
             ("target_miss_rate", target_miss_rate),
@@ -132,7 +162,8 @@ class SQLiteStore:
 
         def write(db):
             db.execute(
-                """INSERT INTO projects VALUES (?, ?, ?, ?)
+                """INSERT INTO projects (name, threshold, target_miss_rate, audit_rate)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                 threshold=COALESCE(?, threshold),
                 target_miss_rate=COALESCE(?, target_miss_rate),
@@ -147,6 +178,9 @@ class SQLiteStore:
                     audit_rate,
                 ),
             )
+            for key, value in (("webhook_url", webhook_url), ("webhook_secret", webhook_secret)):
+                if value is not None:
+                    db.execute(f"UPDATE projects SET {key}=? WHERE name=?", (value, name))
             return ProjectConfig(
                 *db.execute("SELECT * FROM projects WHERE name=?", (name,)).fetchone()
             )
@@ -174,6 +208,7 @@ class SQLiteStore:
     def save_item(self, item):
         data = asdict(item)
         data["created_at"] = item.created_at.isoformat()
+        data["expires_at"] = item.expires_at.isoformat() if item.expires_at else None
         self._run(
             lambda db: db.execute(
                 "INSERT INTO items VALUES (?, ?, ?, ?, ?, ?)",
@@ -229,6 +264,8 @@ class SQLiteStore:
         limit=100,
         offset=0,
         order="asc",
+        exclude_expired=True,
+        now=None,
     ):
         if order not in ("asc", "desc"):
             raise ValueError(f"order must be 'asc' or 'desc', got {order!r}")
@@ -240,21 +277,113 @@ class SQLiteStore:
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
         direction = "ASC" if order == "asc" else "DESC"
-        query += f" ORDER BY created_at {direction}, id {direction} LIMIT ? OFFSET ?"
-        params.extend((limit, offset))
+        query += f" ORDER BY created_at {direction}, id {direction}"
         rows = self._run(lambda db: db.execute(query, params).fetchall())
-        return [_item_from_data(json.loads(row[0])) for row in rows]
+        items = [_item_from_data(json.loads(row[0])) for row in rows]
+        if exclude_expired:
+            if now is None and any(i.expires_at and i.status == Status.pending for i in items):
+                raise ValueError("now is required to filter expiring items")
+            items = [
+                i
+                for i in items
+                if i.status != Status.pending
+                or i.expires_at is None
+                or (now is not None and i.expires_at > now)
+            ]
+        return items[offset : offset + limit]
 
-    def count_items(self, project, *, status=None, min_confidence=None, max_confidence=None):
-        clauses, params = self._item_filters(status, min_confidence, max_confidence)
-        if project is not None:
-            clauses.insert(0, "project=?")
-            params = [project, *params]
-        query = "SELECT COUNT(*) FROM items"
-        if clauses:
-            query += " WHERE " + " AND ".join(clauses)
-        row = self._run(lambda db: db.execute(query, params).fetchone())
-        return row[0]
+    def count_items(
+        self,
+        project,
+        *,
+        status=None,
+        min_confidence=None,
+        max_confidence=None,
+        exclude_expired=True,
+        now=None,
+    ):
+        return len(
+            self.list_items(
+                project,
+                status=status,
+                min_confidence=min_confidence,
+                max_confidence=max_confidence,
+                exclude_expired=exclude_expired,
+                now=now,
+                limit=2**63 - 1,
+            )
+        )
+
+    def register_reason_code(self, entry: ReasonCode):
+        self._run(
+            lambda db: db.execute(
+                "INSERT INTO reason_codes VALUES (?, ?, ?, ?) ON CONFLICT(project, "
+                "code) DO UPDATE SET label=excluded.label, polarity=excluded.polarity",
+                (entry.project, entry.code, entry.label, entry.polarity),
+            )
+        )
+
+    def list_reason_codes(self, project):
+        rows = self._run(
+            lambda db: db.execute(
+                "SELECT * FROM reason_codes WHERE project=? ORDER BY code", (project,)
+            ).fetchall()
+        )
+        return [ReasonCode(project=r[0], code=r[1], label=r[2], polarity=r[3]) for r in rows]
+
+    def set_tag_threshold(self, entry: TagThreshold):
+        validate_unit("threshold", entry.threshold)
+        self._run(
+            lambda db: db.execute(
+                "INSERT INTO tag_thresholds VALUES (?, ?, ?, ?) ON CONFLICT(project, "
+                "tag_key, tag_value) DO UPDATE SET threshold=excluded.threshold",
+                (entry.project, entry.tag_key, entry.tag_value, entry.threshold),
+            )
+        )
+
+    def get_tag_threshold(self, project, tag_key, tag_value):
+        row = self._run(
+            lambda db: db.execute(
+                "SELECT threshold FROM tag_thresholds WHERE project=? AND tag_key=? "
+                "AND tag_value=?",
+                (project, tag_key, tag_value),
+            ).fetchone()
+        )
+        return row[0] if row else None
+
+    def list_tag_thresholds(self, project):
+        rows = self._run(
+            lambda db: db.execute(
+                "SELECT * FROM tag_thresholds WHERE project=? ORDER BY tag_key, tag_value",
+                (project,),
+            ).fetchall()
+        )
+        return [
+            TagThreshold(project=r[0], tag_key=r[1], tag_value=r[2], threshold=r[3]) for r in rows
+        ]
+
+    def supersede_items(self, project, *, trace_id=None, tag=None):
+        if trace_id is None and tag is None:
+            raise ValueError("trace_id or tag is required")
+
+        def write(db):
+            count = 0
+            for item_id, raw in db.execute(
+                "SELECT id, data FROM items WHERE project=? AND status='pending'", (project,)
+            ).fetchall():
+                data = json.loads(raw)
+                if (trace_id is not None and data.get("trace_id") == trace_id) or (
+                    tag is not None and data["tags"].get(tag[0]) == tag[1]
+                ):
+                    data["status"] = "superseded"
+                    db.execute(
+                        "UPDATE items SET status='superseded', data=? WHERE id=?",
+                        (json.dumps(data), item_id),
+                    )
+                    count += 1
+            return count
+
+        return self._run(write)
 
     def save_review(self, review):
         data = asdict(review)

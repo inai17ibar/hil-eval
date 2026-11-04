@@ -32,6 +32,10 @@ def _is_image_bytes(data) -> bool:
     return data.startswith(_IMAGE_MAGIC) or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
 
 
+def _is_video_bytes(data: bytes) -> bool:
+    return data.startswith(b"\x1aE\xdf\xa3") or data[4:8] == b"ftyp"
+
+
 def sniff_mime(data: bytes) -> str:
     """Guess an image mime type from magic bytes; used where no filename/extension
     is available (e.g. the flat, content-addressed blob store)."""
@@ -43,6 +47,10 @@ def sniff_mime(data: bytes) -> str:
         return "image/gif"
     if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
         return "image/webp"
+    if data.startswith(b"\x1aE\xdf\xa3"):
+        return "video/webm"
+    if data[4:8] == b"ftyp":
+        return "video/mp4"
     return "application/octet-stream"
 
 
@@ -60,7 +68,9 @@ def is_image(value) -> bool:
     return any(c.__module__.startswith("PIL.") for c in type(value).__mro__)
 
 
-def store_image(image, store=None, *, role=AssetRole.input) -> AssetRef:
+def store_asset(
+    image, store=None, *, role=AssetRole.input, video_ts=None, bbox=None, order=0
+) -> AssetRef:
     if store is None:
         from .context import get_client
 
@@ -76,7 +86,7 @@ def store_image(image, store=None, *, role=AssetRole.input) -> AssetRef:
         if str(image).startswith(("http://", "https://")):
             raise NotImplementedError("Image URLs are not supported in Milestone 1")
         data = Path(image).read_bytes()
-        mime = mimetypes.guess_type(str(image))[0] or "application/octet-stream"
+        mime = mimetypes.guess_type(str(image))[0] or sniff_mime(data)
     else:
         from PIL import Image
 
@@ -88,4 +98,10 @@ def store_image(image, store=None, *, role=AssetRole.input) -> AssetRef:
         width, height = image.size
         mime = "image/png"
     digest = hashlib.sha256(data).hexdigest()
-    return AssetRef(digest, role, mime, store.put_blob(digest, data, mime), width, height)
+    return AssetRef(
+        digest, role, mime, store.put_blob(digest, data, mime), width, height, order, video_ts, bbox
+    )
+
+
+def store_image(image, store=None, *, role=AssetRole.input) -> AssetRef:
+    return store_asset(image, store, role=role)

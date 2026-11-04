@@ -293,7 +293,7 @@ def test_migrates_m1_database(tmp_path):
     store = SQLiteStore(path)
 
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
         tables = {
             row[0]
             for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
@@ -329,4 +329,4 @@ def test_migration_is_idempotent(tmp_path):
     store = SQLiteStore(path)
     assert store.get_item("legacy-1").confidence == 0.42
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2

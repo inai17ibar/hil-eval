@@ -175,4 +175,6 @@ def list_items(status=None, project=None):
     client = get_client()
     if client is None:
         return []
-    return client.store.list_items(project or client.project, status=status)
+    return client.store.list_items(
+        project or client.project, status=status, now=datetime.now(timezone.utc)
+    )

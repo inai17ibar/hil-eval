@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from .config import DEFAULT_THRESHOLD
-from .types import ReviewAction, RoutedBy, ThresholdHistory
+from .types import ReviewAction, RoutedBy, TagThreshold, ThresholdHistory
 
 _Z_95 = 1.959963984540054
 _MIN_SAMPLES = 30
@@ -34,7 +34,7 @@ class _Sample:
     weight: float
 
 
-def _collect_samples(store, project, threshold, audit_rate):
+def _collect_samples(store, project, threshold, audit_rate, tag=None):
     """Latest-review-per-item, IPW-weighted (requirements.md §8).
 
     low_conf-routed items are *always* fully captured (every below-threshold
@@ -49,6 +49,8 @@ def _collect_samples(store, project, threshold, audit_rate):
     """
     samples = []
     for item, review in store.list_reviewed(project):
+        if tag is not None and item.tags.get(tag[0]) != tag[1]:
+            continue
         if item.routed_by == RoutedBy.manual or item.confidence is None:
             continue
         if review.action == ReviewAction.skip:
@@ -106,15 +108,19 @@ def _evaluate(samples, t, total_weight):
     return review_rate, miss_rate, upper
 
 
-def recommend_threshold(store, project, *, target_miss_rate=None):
+def recommend_threshold(store, project, *, target_miss_rate=None, tag=None):
     """Compute a recommended threshold without writing anything to the store."""
     config = store.get_project(project)
     if config is None:
         raise ValueError(f"unknown project: {project!r}")
     current = config.threshold if config.threshold is not None else DEFAULT_THRESHOLD
+    if tag is not None:
+        scoped = store.get_tag_threshold(project, *tag)
+        if scoped is not None:
+            current = scoped
     target = target_miss_rate if target_miss_rate is not None else config.target_miss_rate
 
-    samples = _collect_samples(store, project, current, config.audit_rate)
+    samples = _collect_samples(store, project, current, config.audit_rate, tag)
     n_samples = len(samples)
     if n_samples < _MIN_SAMPLES:
         return TuneResult(
@@ -159,9 +165,17 @@ def recommend_threshold(store, project, *, target_miss_rate=None):
     )
 
 
-def apply_tuning(store, project, *, target_miss_rate=None):
+def apply_tuning(store, project, *, target_miss_rate=None, tag=None):
     """Recommend a threshold, and if it changes anything, persist it."""
-    result = recommend_threshold(store, project, target_miss_rate=target_miss_rate)
+    result = recommend_threshold(store, project, target_miss_rate=target_miss_rate, tag=tag)
+    if tag is not None:
+        if result.reason != "insufficient_data":
+            store.set_tag_threshold(
+                TagThreshold(
+                    project=project, tag_key=tag[0], tag_value=tag[1], threshold=result.recommended
+                )
+            )
+        return result
     if result.recommended != result.current:
         store.apply_threshold_change(
             ThresholdHistory(

@@ -15,7 +15,7 @@ else:
     except ImportError:
         typer = None
 
-from .exporters import export_items, write_jsonl
+from .exporters import export_hf, export_items, write_jsonl
 from .store.sqlite import SQLiteStore
 from .tuning import apply_tuning, recommend_threshold
 from .types import Status
@@ -32,7 +32,7 @@ if app is not None:
     ):
         ctx.obj = db
 
-    def _serve(db, host, port, api_key, no_ui):
+    def _serve(db, host, port, api_key, no_ui, webhook_url=None, webhook_secret=None):
         import uvicorn
 
         from .server.app import create_app
@@ -44,7 +44,13 @@ if app is not None:
         if not loopback and not api_key:
             typer.echo("Warning: non-loopback host without an API key.", err=True)
         static = Path(__file__).parent / "static"
-        application = create_app(SQLiteStore(db), api_key=api_key, static_dir=static)
+        application = create_app(
+            SQLiteStore(db),
+            api_key=api_key,
+            static_dir=static,
+            webhook_url=webhook_url,
+            webhook_secret=webhook_secret,
+        )
         if no_ui:
             application.router.routes[:] = [
                 r
@@ -60,10 +66,12 @@ if app is not None:
         port: int = 8765,
         api_key: str | None = typer.Option(None, envvar="HIL_API_KEY"),
         no_ui: bool = False,
+        webhook_url: str | None = typer.Option(None, envvar="HIL_WEBHOOK_URL"),
+        webhook_secret: str | None = typer.Option(None, envvar="HIL_WEBHOOK_SECRET"),
         db: str | None = typer.Option(None, help="Override the global database path."),
     ):
         """Serve the review UI and HTTP API."""
-        _serve(db or ctx.obj, host, port, api_key, no_ui)
+        _serve(db or ctx.obj, host, port, api_key, no_ui, webhook_url, webhook_secret)
 
     @app.command()
     def ui(
@@ -90,8 +98,24 @@ if app is not None:
         db: str | None = typer.Option(None, help="Override the global database path."),
     ):
         """Export reviewed items as JSONL."""
+        if fmt == "hf":
+            if output == "-":
+                raise typer.BadParameter("hf requires a real --output path", param_hint="--output")
+            try:
+                export_hf(
+                    SQLiteStore(db or ctx.obj),
+                    project,
+                    output,
+                    statuses=status if status is not None else [Status.approved, Status.corrected],
+                    include_images=not no_images,
+                )
+            except ImportError as exc:
+                raise typer.BadParameter(str(exc)) from exc
+            return
         if fmt not in {"jsonl", "openai-ft", "eval-set"}:
-            raise typer.BadParameter("Choose jsonl, openai-ft, or eval-set", param_hint="--format")
+            raise typer.BadParameter(
+                "Choose jsonl, openai-ft, eval-set, or hf", param_hint="--format"
+            )
         write_jsonl(
             export_items(
                 SQLiteStore(db or ctx.obj),
@@ -109,9 +133,26 @@ if app is not None:
         project: str = typer.Option(...),
         target_miss_rate: float | None = typer.Option(None, min=0, max=1),
         apply: bool = False,
+        by_tag: str | None = typer.Option(None, "--by-tag"),
         db: str | None = typer.Option(None, help="Override the global database path."),
     ):
         """Recommend a threshold; optionally persist it."""
+        if by_tag is not None:
+            store = SQLiteStore(db or ctx.obj)
+            values = sorted(
+                {i.tags[by_tag] for i, _ in store.list_reviewed(project) if by_tag in i.tags}
+            )
+            if store.get_project(project) is None:
+                raise typer.BadParameter(f"unknown project: {project!r}")
+            typer.echo("tag\tcurrent\trecommended\tn_samples\treason")
+            for value in values:
+                result = (apply_tuning if apply else recommend_threshold)(
+                    store, project, target_miss_rate=target_miss_rate, tag=(by_tag, value)
+                )
+                typer.echo(
+                    f"{by_tag}={value}\t{result.current}\t{result.recommended}\t{result.n_samples}\t{result.reason}"
+                )
+            return
         try:
             result = (apply_tuning if apply else recommend_threshold)(
                 SQLiteStore(db or ctx.obj), project, target_miss_rate=target_miss_rate
