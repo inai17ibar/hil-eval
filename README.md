@@ -94,3 +94,50 @@ Tuning reports the current and recommended thresholds, sample count, estimated
 review/miss rates, and the miss-rate upper bound. At least 30 usable reviews are
 required. `--apply` saves the recommendation; `@hil.review(threshold="auto", ...)`
 picks up the saved threshold on subsequent calls.
+
+## M3 review and integrations
+
+Install `hil-eval[server,hf]` for the review server and optional PyArrow Parquet
+exports (`hil-eval export --project demo --format hf --output reviews.parquet`).
+The base package still has no required dependencies. The UI supports structured
+output forms, word diffs, choice buttons, project reason codes, image bounding
+boxes, video timestamps, and shareable `/items/<id>` links.
+
+Create a choice review through the HTTP API:
+
+```sh
+curl -X POST http://127.0.0.1:8765/v1/items \
+  -H 'Content-Type: application/json' \
+  -d '{"project":"demo","input":"Pick a color","output":"red","options":["red","blue"]}'
+curl -X POST http://127.0.0.1:8765/v1/items/ITEM_ID/review \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"choose","choice":"blue","reason_text":"Matches the reference"}'
+```
+
+Configure asynchronous signed webhooks with:
+
+```sh
+hil-eval serve --webhook-url https://example.com/hooks --webhook-secret "$HOOK_SECRET"
+```
+
+`HIL_WEBHOOK_URL` and `HIL_WEBHOOK_SECRET` are also supported; project settings
+can override these defaults. Receivers get `item.created` and `review.created`
+events in `X-HilEval-Event` and should verify `X-HilEval-Signature` against the
+HMAC-SHA256 of the raw request body. Failed deliveries retry with bounded backoff.
+
+Generate the checked-in API contract with `hil-eval openapi --output openapi.yaml`.
+The hand-written TypeScript client lives in `clients/ts`:
+
+```ts
+import { HilEvalClient } from "@hil-eval/client";
+const client = new HilEvalClient({ baseUrl: "http://127.0.0.1:8765", apiKey: "secret" });
+const queue = await client.listItems({ project: "demo", status: ["pending"] });
+await client.reviewItem(queue.items[0].id, { action: "choose", choice: "blue" });
+```
+
+For local verification, run the Python checks, `npm test` in `clients/ts`, and
+`npm run build`, `npm test`, and `npx playwright test` in `ui`. Browser tests launch
+an isolated temporary database server on port 8799. CI runs these suites and
+validates workflow syntax with actionlint. The TestPyPI workflow is triggered by
+`v*` tags or manually, uses the `testpypi` environment and OIDC trusted publishing
+(no API token); configure that trusted publisher on TestPyPI before releasing.

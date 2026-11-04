@@ -59,3 +59,7 @@ git worktree add ../hil-ci       -b feat/ci          # かぜ
 ## リスク対応 / バッファ
 - 各週金曜は統合・バッファ。遅延時は HF形式、TSクライアント、UIの磨き込み（diff表示・ショートカット）を削る
 - 契約変更は Claude Code の承認必須（ADRを docs/adr/ に残す）
+
+## Expanded M3
+
+The expanded M3 in [m3-plan.md](m3-plan.md) supersedes the original three-week-plan M3 milestone row. Phases 1–6 cover the contracts in [ADR 0003](adr/0003-m3-contract.md), webhooks, judges, Parquet exports, OpenAPI/TypeScript client, review UI, and CI/TestPyPI delivery.
