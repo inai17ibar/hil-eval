@@ -32,6 +32,20 @@ def _is_image_bytes(data) -> bool:
     return data.startswith(_IMAGE_MAGIC) or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
 
 
+def sniff_mime(data: bytes) -> str:
+    """Guess an image mime type from magic bytes; used where no filename/extension
+    is available (e.g. the flat, content-addressed blob store)."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "image/webp"
+    return "application/octet-stream"
+
+
 def is_image(value) -> bool:
     """Implicit image detection used for values not explicitly listed in ``images``.
 
@@ -57,15 +71,7 @@ def store_image(image, store=None, *, role=AssetRole.input) -> AssetRef:
     width = height = None
     if isinstance(image, (bytes, bytearray)):
         data = bytes(image)
-        mime = "application/octet-stream"
-        if data.startswith(b"\x89PNG\r\n\x1a\n"):
-            mime = "image/png"
-        elif data.startswith(b"\xff\xd8\xff"):
-            mime = "image/jpeg"
-        elif data.startswith((b"GIF87a", b"GIF89a")):
-            mime = "image/gif"
-        elif data.startswith(b"RIFF") and data[8:12] == b"WEBP":
-            mime = "image/webp"
+        mime = sniff_mime(data)
     elif isinstance(image, (str, Path)):
         if str(image).startswith(("http://", "https://")):
             raise NotImplementedError("Image URLs are not supported in Milestone 1")
