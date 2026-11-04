@@ -7,10 +7,24 @@ from functools import wraps
 
 from .config import DEFAULT_THRESHOLD
 from .context import get_client, logger
-from .types import Judgment, RoutedBy
+from .types import Judgment, RoutedBy, validate_unit
 
 
-def review(judge, threshold=0.8, audit_rate=None, inputs=None, tags=None, project=None):
+def review(
+    judge, threshold=0.8, audit_rate=None, inputs=None, images=None, tags=None, project=None
+):
+    """Decorate a function so its outputs are judged and low-confidence ones queued.
+
+    judge: ``(arguments: dict, output) -> Judgment | float``; receives all bound
+        arguments (``self``/``cls`` excluded).
+    inputs: optional whitelist of argument names to *store* (default: all).
+    images: argument names whose values are images (path str/Path, bytes, PIL).
+        Bytes with an image signature, PIL images and existing image ``Path`` objects
+        are detected automatically; plain strings are only treated as images here.
+    """
+    if threshold != "auto":
+        validate_unit("threshold", threshold)
+    validate_unit("audit_rate", audit_rate, allow_none=True)
     if inspect.iscoroutinefunction(judge) or inspect.isasyncgenfunction(judge):
         raise TypeError("Milestone 1 requires a synchronous judge")
 
@@ -18,6 +32,10 @@ def review(judge, threshold=0.8, audit_rate=None, inputs=None, tags=None, projec
         if inspect.isgeneratorfunction(fn) or inspect.isasyncgenfunction(fn):
             raise TypeError("Generators are not supported in Milestone 1")
         signature = inspect.signature(fn)
+        unknown = (set(inputs or ()) | set(images or ())) - set(signature.parameters)
+        if unknown:
+            raise ValueError(f"Unknown argument name(s) for {fn.__qualname__}: {sorted(unknown)}")
+        image_names = tuple(images or ())
         rng = random.Random()
         warned_auto = False
 
@@ -29,17 +47,18 @@ def review(judge, threshold=0.8, audit_rate=None, inputs=None, tags=None, projec
             try:
                 bound = signature.bind(*args, **kwargs)
                 bound.apply_defaults()
+                arguments = {k: v for k, v in bound.arguments.items() if k not in ("self", "cls")}
                 captured = (
-                    {k: v for k, v in bound.arguments.items() if k in inputs}
+                    {k: v for k, v in arguments.items() if k in inputs or k in image_names}
                     if inputs is not None
-                    else {k: v for k, v in bound.arguments.items() if k not in ("self", "cls")}
+                    else arguments
                 )
                 config = client.config(project)
                 rate = config.audit_rate if audit_rate is None else audit_rate
                 audited = rng.random() < rate
                 error = None
                 try:
-                    judgment = judge(captured, output)
+                    judgment = judge(arguments, output)
                     if not isinstance(judgment, Judgment):
                         judgment = Judgment(judgment)
                 except Exception as exc:
@@ -71,6 +90,7 @@ def review(judge, threshold=0.8, audit_rate=None, inputs=None, tags=None, projec
                         fn_name=fn.__qualname__,
                         tags=tags,
                         judge_error=error,
+                        images=image_names,
                     )
             except Exception:
                 logger.exception("Failed to record review item")
@@ -80,7 +100,10 @@ def review(judge, threshold=0.8, audit_rate=None, inputs=None, tags=None, projec
             @wraps(fn)
             async def async_wrapper(*args, **kwargs):
                 output = await fn(*args, **kwargs)
-                await asyncio.to_thread(record, args, kwargs, output)
+                try:
+                    await asyncio.to_thread(record, args, kwargs, output)
+                except Exception:
+                    logger.exception("Failed to record review item")
                 return output
 
             return async_wrapper

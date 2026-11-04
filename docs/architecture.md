@@ -130,3 +130,10 @@ Always persisted with `routed_by=manual` regardless of confidence/threshold (exp
 12. **Image args mixed into `inputs`**: values matching path/bytes/PIL types get blob-stored and replaced with `{"$asset": sha256}` in the JSON `input`; non-image values pass through `json.dumps` sanitization.
 13. **`hil.init()` called twice with different project**: allowed — supports multi-project processes via `Client`; default client is last-`init`-wins, documented as "single default project" convention.
 14. **Store write fails after retries (disk full, permissions)**: swallowed for `@review` (fail-open); `submit` returns `None` and logs at ERROR (explicit call, so caller may want to know, but never raises).
+
+## Post-review decisions (Codex review of M1)
+- `inputs` = whitelist of argument names to **store**; the judge always receives all bound arguments (minus `self`/`cls`). Unknown names raise `ValueError` at decoration time.
+- `images` = argument names explicitly treated as images (path `str`/`Path`, bytes, PIL). Implicit detection elsewhere is limited to PIL images, bytes with a PNG/JPEG/GIF/WEBP signature, and existing image `Path` objects. Plain strings (incl. URLs, `"x.png"`) are never implicitly images.
+- A failing asset (e.g. missing file) is recorded as `{"$asset_error": "..."}`; the item is still saved.
+- `threshold`, `audit_rate`, `target_miss_rate` are validated (finite, non-bool, in [0, 1]) in `review`, `init`, and the store.
+- The async wrapper guards the `asyncio.to_thread` offload so recording can never replace the function's result.

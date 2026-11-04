@@ -26,6 +26,20 @@ class AssetRole(str, Enum):
     output = "output"
 
 
+def validate_unit(name: str, value: Any, *, allow_none: bool = False) -> float | None:
+    """Validate a finite, non-boolean number in [0, 1] (reject, never clamp)."""
+    if value is None and allow_none:
+        return None
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or not 0 <= value <= 1
+    ):
+        raise ValueError(f"{name} must be a finite number in [0, 1], got {value!r}")
+    return float(value)
+
+
 @dataclass(frozen=True)
 class Judgment:
     confidence: float
@@ -34,14 +48,7 @@ class Judgment:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
-        c = self.confidence
-        if (
-            not isinstance(c, (int, float))
-            or isinstance(c, bool)
-            or not math.isfinite(c)
-            or not 0 <= c <= 1
-        ):
-            raise ValueError(f"confidence must be a finite float in [0,1], got {c!r}")
+        validate_unit("confidence", self.confidence)
 
 
 @dataclass

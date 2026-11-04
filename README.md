@@ -35,6 +35,7 @@ The decorated function's return value is always passed through unchanged; judge 
 storage failures are logged and never break your app (fail-open). Async functions work too.
 
 - `threshold="auto"` uses the project's stored threshold (falls back to 0.8).
+- `images=["image"]` marks arguments as images (paths, bytes, PIL) stored by SHA-256.
 - `audit_rate` routes a random fraction of high-confidence items for unbiased tuning.
 - `hil.submit(input=..., output=..., confidence=...)` enqueues an item manually.
 

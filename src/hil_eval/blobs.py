@@ -25,13 +25,24 @@ def put_blob(directory: Path, sha256: str, data: bytes) -> str:
     return str(path)
 
 
-def is_image(value):
-    if isinstance(value, (bytes, Path)):
-        return True
-    if isinstance(value, str):
-        return value.startswith(("http://", "https://")) or (
-            mimetypes.guess_type(value)[0] or ""
-        ).startswith("image/")
+_IMAGE_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a")
+
+
+def _is_image_bytes(data) -> bool:
+    return data.startswith(_IMAGE_MAGIC) or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+
+
+def is_image(value) -> bool:
+    """Implicit image detection used for values not explicitly listed in ``images``.
+
+    Plain strings are never treated as images (they may be ordinary text or URLs);
+    only PIL images, bytes with a known image signature, and ``Path`` objects that
+    point to an existing image file qualify.
+    """
+    if isinstance(value, (bytes, bytearray)):
+        return _is_image_bytes(bytes(value))
+    if isinstance(value, Path):
+        return value.is_file() and (mimetypes.guess_type(str(value))[0] or "").startswith("image/")
     return any(c.__module__.startswith("PIL.") for c in type(value).__mro__)
 
 
@@ -44,8 +55,8 @@ def store_image(image, store=None, *, role=AssetRole.input) -> AssetRef:
             raise RuntimeError("hil.init() is required before storing images")
         store = client.store
     width = height = None
-    if isinstance(image, bytes):
-        data = image
+    if isinstance(image, (bytes, bytearray)):
+        data = bytes(image)
         mime = "application/octet-stream"
         if data.startswith(b"\x89PNG\r\n\x1a\n"):
             mime = "image/png"

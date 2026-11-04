@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ..blobs import put_blob
 from ..config import DEFAULT_AUDIT_RATE, DEFAULT_TARGET_MISS_RATE
-from ..types import AssetRef, AssetRole, Item, ProjectConfig, RoutedBy, Status
+from ..types import AssetRef, AssetRole, Item, ProjectConfig, RoutedBy, Status, validate_unit
 
 
 class SQLiteStore:
@@ -47,6 +47,13 @@ class SQLiteStore:
                 time.sleep(delay)
 
     def ensure_project(self, name, *, threshold=None, target_miss_rate=None, audit_rate=None):
+        for key, value in (
+            ("threshold", threshold),
+            ("target_miss_rate", target_miss_rate),
+            ("audit_rate", audit_rate),
+        ):
+            validate_unit(key, value, allow_none=True)
+
         def write(db):
             db.execute(
                 """INSERT INTO projects VALUES (?, ?, ?, ?)
@@ -77,6 +84,7 @@ class SQLiteStore:
         return ProjectConfig(*row) if row else None
 
     def update_threshold(self, project, threshold):
+        validate_unit("threshold", threshold)
         self._run(
             lambda db: db.execute(
                 "UPDATE projects SET threshold=? WHERE name=?", (threshold, project)

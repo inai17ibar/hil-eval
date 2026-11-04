@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from .blobs import is_image, store_image
 from .store.sqlite import SQLiteStore
-from .types import AssetRole, Item, Judgment, RoutedBy, Status
+from .types import AssetRole, Item, Judgment, RoutedBy, Status, validate_unit
 
 logger = logging.getLogger("hil_eval")
 _default_client = None
@@ -58,16 +58,24 @@ class Client:
         trace_id=None,
         judge_error=None,
         judge_label=None,
+        images=(),
     ):
         project = project or self.project
         self.config(project)
         assets = []
 
+        def store_asset(value, role):
+            try:
+                asset = store_image(value, self.store, role=role)
+            except Exception as exc:  # keep the item; record why the asset is missing
+                logger.warning("Could not store image asset: %s", exc)
+                return {"$asset_error": f"{type(exc).__name__}: {exc}"}
+            assets.append(asset)
+            return {"$asset": asset.sha256}
+
         def capture(value, role):
             if is_image(value):
-                asset = store_image(value, self.store, role=role)
-                assets.append(asset)
-                return {"$asset": asset.sha256}
+                return store_asset(value, role)
             if isinstance(value, dict):
                 return {k: capture(v, role) for k, v in value.items()}
             if isinstance(value, (list, tuple)):
@@ -85,7 +93,15 @@ class Client:
             id=uuid4().hex,
             project=project,
             fn_name=fn_name,
-            input=prepare(input, AssetRole.input),
+            input=prepare(
+                {
+                    k: (store_asset(v, AssetRole.input) if k in images else v)
+                    for k, v in input.items()
+                }
+                if images and isinstance(input, dict)
+                else input,
+                AssetRole.input,
+            ),
             output=prepare(output, AssetRole.output),
             confidence=judgment.confidence if judgment else None,
             judge_label=judgment.label if judgment else judge_label,
@@ -112,6 +128,9 @@ def init(
     global _default_client
     if not store.startswith("sqlite:///"):
         raise ValueError("Milestone 1 supports only sqlite:/// URLs")
+    validate_unit("threshold", threshold, allow_none=True)
+    validate_unit("target_miss_rate", target_miss_rate, allow_none=True)
+    validate_unit("audit_rate", audit_rate, allow_none=True)
     backend = SQLiteStore(store[len("sqlite:///") :])
     backend.ensure_project(
         project, threshold=threshold, target_miss_rate=target_miss_rate, audit_rate=audit_rate
