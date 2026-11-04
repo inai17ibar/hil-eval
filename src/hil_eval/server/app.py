@@ -119,7 +119,9 @@ def create_app(store, api_key: str | None = None, static_dir: str | Path | None 
     app = FastAPI(title="hil-eval")
 
     def _key_matches(provided: str | None) -> bool:
-        return provided is not None and hmac.compare_digest(provided, api_key)
+        return (
+            provided is not None and api_key is not None and hmac.compare_digest(provided, api_key)
+        )
 
     async def require_api_key(x_api_key: str | None = Header(default=None)):
         if api_key is not None and not _key_matches(x_api_key):

@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from collections.abc import Callable
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
+from typing import TypeVar
 
 from ..blobs import put_blob
 from ..config import DEFAULT_AUDIT_RATE, DEFAULT_TARGET_MISS_RATE
@@ -29,6 +31,8 @@ _ACTION_TO_STATUS = {
     ReviewAction.reject: Status.rejected,
     ReviewAction.skip: Status.skipped,
 }
+
+_T = TypeVar("_T")
 
 SCHEMA_VERSION = 1
 
@@ -101,7 +105,7 @@ class SQLiteStore:
         if updates:
             db.executemany("UPDATE items SET confidence=? WHERE id=?", updates)
 
-    def _run(self, operation):
+    def _run(self, operation: Callable[[sqlite3.Connection], _T]) -> _T:
         for delay in (0.02, 0.06, 0.15, None):
             try:
                 db = sqlite3.connect(self.path)
@@ -116,6 +120,7 @@ class SQLiteStore:
                 if "locked" not in str(exc).lower() or delay is None:
                     raise
                 time.sleep(delay)
+        raise AssertionError("retry loop exhausted")
 
     def ensure_project(self, name, *, threshold=None, target_miss_rate=None, audit_rate=None):
         for key, value in (

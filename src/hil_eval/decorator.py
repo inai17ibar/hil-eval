@@ -78,7 +78,11 @@ def review(
                 routed = (
                     RoutedBy.audit
                     if audited
-                    else (RoutedBy.low_conf if judgment.confidence < resolved else None)
+                    else (
+                        RoutedBy.low_conf
+                        if judgment is not None and judgment.confidence < resolved
+                        else None
+                    )
                 )
                 if routed is not None:
                     client.record(
