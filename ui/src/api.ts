@@ -1,13 +1,16 @@
 export type Json =
   null | boolean | number | string | Json[] | { [key: string]: Json };
 export type Status =
-  "pending" | "approved" | "corrected" | "rejected" | "skipped";
-export type Action = "approve" | "edit" | "reject" | "skip";
+  "pending" | "approved" | "corrected" | "rejected" | "skipped" | "superseded";
+export type Action = "approve" | "edit" | "reject" | "skip" | "choose";
 export interface Review {
   id: string;
   item_id: string;
   reviewer: string | null;
   action: Action;
+  choice: Json;
+  reason_codes: string[];
+  reason_text: string | null;
   corrected_output: Json;
   judge_correct: boolean | null;
   note: string | null;
@@ -20,6 +23,9 @@ export interface Asset {
   width: number | null;
   height: number | null;
   url: string;
+  order: number;
+  video_ts: number | null;
+  bbox: [number, number, number, number] | null;
 }
 export interface Item {
   id: string;
@@ -37,11 +43,13 @@ export interface Item {
   trace_id: string | null;
   created_at: string;
   assets: Asset[];
+  options: Json[] | null;
+  expires_at: string | null;
   reviews?: Review[];
 }
 export interface Project {
   name: string;
-  threshold: number;
+  threshold: number | null;
   target_miss_rate: number;
   audit_rate: number;
 }
@@ -57,9 +65,18 @@ export interface Filters {
 }
 export interface ReviewBody {
   action: Action;
+  choice?: Json;
+  reason_codes?: string[];
+  reason_text?: string;
   corrected_output?: Json;
   judge_correct: boolean | null;
   note?: string;
+}
+export interface ReasonCode {
+  project: string;
+  code: string;
+  label: string | null;
+  polarity: string | null;
 }
 const urlKey = new URLSearchParams(window.location.search).get("api_key");
 let apiKey = urlKey ?? "";
@@ -89,6 +106,12 @@ async function request<T>(
   return response.json() as Promise<T>;
 }
 export const api = {
+  reasonCodes: (project: string, signal?: AbortSignal) =>
+    request<ReasonCode[]>(
+      `/v1/projects/${encodeURIComponent(project)}/reason-codes`,
+      undefined,
+      signal,
+    ),
   projects: (signal?: AbortSignal) =>
     request<Project[]>("/v1/projects", undefined, signal),
   queue: (filters: Filters, offset: number, signal?: AbortSignal) => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   api,
@@ -11,6 +11,10 @@ import {
   type Queue,
 } from "./api";
 import "./style.css";
+import { JsonForm } from "./JsonForm";
+import { AssetPreview } from "./AssetPreview";
+import { Diff } from "./Diff";
+import type { ReasonCode } from "./api";
 const pretty = (value: Json) => JSON.stringify(value, null, 2);
 const confidence = (value: number | null) =>
   value === null ? "—" : `${(value * 100).toFixed(1)}%`;
@@ -43,7 +47,16 @@ function Value({ value }: { value: Json }) {
   }
   return <pre>{typeof value === "string" ? value : pretty(value)}</pre>;
 }
+const linkedItem = () => {
+  const match = location.pathname.match(/^\/items\/([^/]+)$/);
+  try {
+    return match ? decodeURIComponent(match[1]) : null;
+  } catch {
+    return null;
+  }
+};
 function App() {
+  const preserveLink = useRef(!!linkedItem());
   const [projects, setProjects] = useState<Project[]>([]);
   const [filters, setFilters] = useState<Filters>({
     project: "",
@@ -53,7 +66,7 @@ function App() {
   });
   const [offset, setOffset] = useState(0);
   const [queue, setQueue] = useState<Queue>({ items: [], total: 0 });
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(linkedItem);
   const [item, setItem] = useState<Item | null>(null);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -62,6 +75,10 @@ function App() {
   const [revision, setRevision] = useState(0);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const [structuredDraft, setStructuredDraft] = useState<Json>(null);
+  const [reasonCodes, setReasonCodes] = useState<ReasonCode[]>([]);
+  const [reasons, setReasons] = useState<string[]>([]);
+  const [reasonText, setReasonText] = useState("");
   const [judge, setJudge] = useState("");
   const [note, setNote] = useState("");
   const invalid =
@@ -96,8 +113,12 @@ function App() {
           return;
         }
         setQueue(q);
+        const preserve = preserveLink.current;
+        preserveLink.current = false;
         setSelected((id) =>
-          q.items.some((i) => i.id === id) ? id : (q.items[0]?.id ?? null),
+          (preserve && id) || q.items.some((i) => i.id === id)
+            ? id
+            : (q.items[0]?.id ?? null),
         );
       })
       .catch((e) => {
@@ -113,6 +134,8 @@ function App() {
     setEditing(false);
     setJudge("");
     setNote("");
+    setReasons([]);
+    setReasonText("");
     if (!selected) {
       setDetailLoading(false);
       return;
@@ -130,6 +153,31 @@ function App() {
       });
     return () => c.abort();
   }, [selected, revision]);
+  useEffect(() => {
+    const path = selected ? `/items/${encodeURIComponent(selected)}` : "/";
+    if (location.pathname !== path)
+      history.pushState(null, "", path + location.search);
+  }, [selected]);
+  useEffect(() => {
+    const pop = () => {
+      preserveLink.current = true;
+      setSelected(linkedItem());
+    };
+    window.addEventListener("popstate", pop);
+    return () => window.removeEventListener("popstate", pop);
+  }, []);
+  useEffect(() => {
+    setReasonCodes([]);
+    if (!item) return;
+    const c = new AbortController();
+    api
+      .reasonCodes(item.project, c.signal)
+      .then(setReasonCodes)
+      .catch((e) => {
+        if (!c.signal.aborted) setError(String(e));
+      });
+    return () => c.abort();
+  }, [item?.project]);
   function change(key: keyof Filters, value: string) {
     setFilters((f) => ({ ...f, [key]: value }));
     setOffset(0);
@@ -143,13 +191,20 @@ function App() {
   function edit() {
     if (item && !busy) {
       setDraft(pretty(item.output));
+      setStructuredDraft(item.output);
       setEditing(true);
     }
   }
-  async function submit(action: Action) {
+  async function submit(action: Action, choice?: Json) {
     if (!item || busy || loading || invalid) return;
     let corrected: Json = draft;
-    if (action === "edit") {
+    if (
+      action === "edit" &&
+      item.output !== null &&
+      typeof item.output === "object"
+    ) {
+      corrected = structuredDraft;
+    } else if (action === "edit") {
       try {
         corrected = JSON.parse(draft) as Json;
       } catch {
@@ -161,6 +216,9 @@ function App() {
     try {
       await api.review(item.id, {
         action,
+        ...(action === "choose" ? { choice } : {}),
+        reason_codes: reasons,
+        reason_text: reasonText,
         judge_correct: judge === "" ? null : judge === "yes",
         ...(note ? { note } : {}),
         ...(action === "edit" ? { corrected_output: corrected } : {}),
@@ -249,7 +307,10 @@ function App() {
               <select
                 value={filters.project}
                 disabled={busy}
-                onChange={(e) => change("project", e.target.value)}
+                onChange={(e) => {
+                  setSelected(null);
+                  change("project", e.target.value);
+                }}
               >
                 <option value="">All projects</option>
                 {projects.map((p) => (
@@ -262,7 +323,10 @@ function App() {
               <select
                 value={filters.status}
                 disabled={busy}
-                onChange={(e) => change("status", e.target.value)}
+                onChange={(e) => {
+                  setSelected(null);
+                  change("status", e.target.value);
+                }}
               >
                 <option value="">All statuses</option>
                 {[
@@ -271,6 +335,7 @@ function App() {
                   "corrected",
                   "rejected",
                   "skipped",
+                  "superseded",
                 ].map((s) => (
                   <option key={s}>{s}</option>
                 ))}
@@ -400,12 +465,7 @@ function App() {
                   <div className="assets">
                     {item.assets.map((asset, index) => (
                       <figure key={`${asset.sha256}-${index}`}>
-                        <img
-                          className="asset"
-                          src={imageUrl(asset.sha256)}
-                          alt={`${asset.role} asset`}
-                          loading="lazy"
-                        />
+                        <AssetPreview asset={asset} />
                         <figcaption>
                           {asset.role} · {asset.mime}
                         </figcaption>
@@ -442,22 +502,76 @@ function App() {
                       placeholder="Add context for this review"
                     />
                   </label>
+                  {reasonCodes.length > 0 && (
+                    <label>
+                      Reason codes
+                      <select
+                        multiple
+                        value={reasons}
+                        onChange={(e) =>
+                          setReasons(
+                            Array.from(
+                              e.target.selectedOptions,
+                              (option) => option.value,
+                            ),
+                          )
+                        }
+                      >
+                        {reasonCodes.map((r) => (
+                          <option key={r.code} value={r.code}>
+                            {r.label ?? r.code}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <label>
+                    Reason text
+                    <textarea
+                      value={reasonText}
+                      onChange={(e) => setReasonText(e.target.value)}
+                    />
+                  </label>
+                  {!!item.options?.length && (
+                    <div className="actions" aria-label="Choices">
+                      {item.options.map((option, i) => (
+                        <button
+                          key={i}
+                          onClick={() => void submit("choose", option)}
+                        >
+                          Choose {pretty(option)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {editing && (
                     <div className="editor">
-                      <label>
-                        Corrected output
-                        <textarea
-                          autoFocus
-                          rows={10}
-                          value={draft}
-                          onChange={(e) => setDraft(e.target.value)}
-                          spellCheck={false}
+                      {item.output !== null &&
+                      typeof item.output === "object" ? (
+                        <JsonForm
+                          value={structuredDraft}
+                          onChange={setStructuredDraft}
                         />
-                      </label>
-                      <p className="muted">
-                        Valid JSON is saved as structured data. Other text is
-                        saved as a string.
-                      </p>
+                      ) : (
+                        <label>
+                          Corrected output
+                          <textarea
+                            autoFocus
+                            rows={10}
+                            value={draft}
+                            onChange={(e) => setDraft(e.target.value)}
+                          />
+                        </label>
+                      )}
+                      <Diff
+                        before={pretty(item.output)}
+                        after={
+                          item.output !== null &&
+                          typeof item.output === "object"
+                            ? pretty(structuredDraft)
+                            : draft
+                        }
+                      />
                       <div className="actions">
                         <button
                           className="primary"
@@ -517,6 +631,13 @@ function App() {
                             ? "Yes"
                             : "No"}
                       </p>
+                      {review.action === "choose" && (
+                        <pre>Choice: {pretty(review.choice)}</pre>
+                      )}
+                      {!!review.reason_codes?.length && (
+                        <p>{review.reason_codes.join(", ")}</p>
+                      )}
+                      {review.reason_text && <p>{review.reason_text}</p>}
                       {review.note && <p className="reason">{review.note}</p>}
                       {review.action === "edit" && (
                         <pre>{pretty(review.corrected_output)}</pre>

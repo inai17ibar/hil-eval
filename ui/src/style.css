@@ -417,3 +417,24 @@ kbd {
     display: none;
   }
 }
+.image-frame {
+  position: relative;
+  display: inline-block;
+}
+.image-frame .asset {
+  display: block;
+}
+.bbox {
+  position: absolute;
+  border: 2px solid #e05252;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+ins {
+  background: #c9f4d8;
+  color: #143821;
+}
+del {
+  background: #ffd4d4;
+  color: #601919;
+}
