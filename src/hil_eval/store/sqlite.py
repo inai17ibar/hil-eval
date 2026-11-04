@@ -233,10 +233,12 @@ class SQLiteStore:
         if order not in ("asc", "desc"):
             raise ValueError(f"order must be 'asc' or 'desc', got {order!r}")
         clauses, params = self._item_filters(status, min_confidence, max_confidence)
-        query = "SELECT data FROM items WHERE project=?"
-        params = [project, *params]
-        for clause in clauses:
-            query += f" AND {clause}"
+        if project is not None:
+            clauses.insert(0, "project=?")
+            params = [project, *params]
+        query = "SELECT data FROM items"
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
         direction = "ASC" if order == "asc" else "DESC"
         query += f" ORDER BY created_at {direction}, id {direction} LIMIT ? OFFSET ?"
         params.extend((limit, offset))
@@ -245,10 +247,12 @@ class SQLiteStore:
 
     def count_items(self, project, *, status=None, min_confidence=None, max_confidence=None):
         clauses, params = self._item_filters(status, min_confidence, max_confidence)
-        query = "SELECT COUNT(*) FROM items WHERE project=?"
-        params = [project, *params]
-        for clause in clauses:
-            query += f" AND {clause}"
+        if project is not None:
+            clauses.insert(0, "project=?")
+            params = [project, *params]
+        query = "SELECT COUNT(*) FROM items"
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
         row = self._run(lambda db: db.execute(query, params).fetchone())
         return row[0]
 
@@ -313,6 +317,26 @@ class SQLiteStore:
                 (entry.id, entry.project, data["created_at"], json.dumps(data)),
             )
         )
+        return entry
+
+    def apply_threshold_change(self, entry):
+        """Insert a history entry and set the project threshold in one transaction."""
+        validate_unit("threshold", entry.new)
+        data = asdict(entry)
+        data["created_at"] = entry.created_at.isoformat()
+
+        def write(db):
+            cur = db.execute(
+                "UPDATE projects SET threshold=? WHERE name=?", (entry.new, entry.project)
+            )
+            if cur.rowcount != 1:
+                raise KeyError(f"unknown project {entry.project!r}")
+            db.execute(
+                "INSERT INTO threshold_history (id, project, created_at, data) VALUES (?, ?, ?, ?)",
+                (entry.id, entry.project, data["created_at"], json.dumps(data)),
+            )
+
+        self._run(write)
         return entry
 
     def list_threshold_history(self, project):

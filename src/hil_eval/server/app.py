@@ -95,7 +95,7 @@ class CreateItemRequest(BaseModel):
     trace_id: str | None = None
     fn_name: str | None = None
 
-    @field_validator("confidence")
+    @field_validator("confidence", mode="before")
     @classmethod
     def _check_confidence(cls, value):
         return validate_unit("confidence", value, allow_none=True)
@@ -144,7 +144,7 @@ def create_app(store, api_key: str | None = None, static_dir: str | Path | None 
 
     @app.get("/v1/items", dependencies=[Depends(require_api_key)])
     def list_items(
-        project: str,
+        project: str | None = None,
         status: Annotated[list[Status] | None, Query()] = None,
         min_confidence: Annotated[float | None, Query(ge=0.0, le=1.0)] = None,
         max_confidence: Annotated[float | None, Query(ge=0.0, le=1.0)] = None,

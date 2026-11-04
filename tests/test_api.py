@@ -225,7 +225,8 @@ class TestApiKeyAuth:
         assert resp.status_code == 200
 
 
-def test_static_ui_not_built_message(client):
+def test_static_ui_not_built_message(store, tmp_path):
+    client = TestClient(create_app(store, static_dir=tmp_path / "missing"))
     resp = client.get("/")
     assert resp.status_code == 200
     assert "not built" in resp.text.lower()
@@ -261,3 +262,26 @@ def test_static_ui_fallback_blocks_path_traversal(store, tmp_path):
     resp = client.get("/..%2fsecret.txt")
     assert resp.status_code == 200
     assert resp.text == "<html>index</html>"
+
+
+def test_list_items_without_project_returns_all_projects(tmp_path):
+    from fastapi.testclient import TestClient
+
+    import hil_eval as hil
+    from hil_eval.server.app import create_app
+    from hil_eval.store.sqlite import SQLiteStore
+
+    store = SQLiteStore(tmp_path / "hil.db")
+    client = TestClient(create_app(store))
+    for project in ("a", "b"):
+        r = client.post("/v1/items", json={"project": project, "input": "x", "output": "y"})
+        assert r.status_code == 201
+    body = client.get("/v1/items").json()
+    assert body["total"] == 2
+    assert {i["project"] for i in body["items"]} == {"a", "b"}
+    assert hil is not None
+
+
+def test_create_item_rejects_boolean_confidence(client):
+    r = client.post("/v1/items", json={"project": "p", "input": 1, "output": 2, "confidence": True})
+    assert r.status_code == 422
