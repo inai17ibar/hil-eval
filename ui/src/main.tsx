@@ -1,5 +1,11 @@
 import { ReviewControls } from "./ReviewControls";
-import React, { useEffect, useRef, useState } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { createRoot } from "react-dom/client";
 import {
   api,
@@ -15,21 +21,21 @@ import "./style.css";
 import { JsonForm } from "./JsonForm";
 import { AssetPreview } from "./AssetPreview";
 import { Diff } from "./Diff";
-import type { ReasonCode } from "./api";
+import type { Asset, ReasonCode } from "./api";
+const AssetsContext = createContext<Asset[]>([]);
+function InlineAsset({ sha, alt }: { sha: string; alt: string }) {
+  const assets = useContext(AssetsContext);
+  const asset = assets.find((a) => a.sha256 === sha);
+  if (asset) return <AssetPreview asset={asset} />;
+  return <img className="asset" src={imageUrl(sha)} alt={alt} loading="lazy" />;
+}
 const pretty = (value: Json) => JSON.stringify(value, null, 2);
 const confidence = (value: number | null) =>
   value === null ? "—" : `${(value * 100).toFixed(1)}%`;
 function Value({ value }: { value: Json }) {
   if (value && typeof value === "object") {
     if (!Array.isArray(value) && typeof value.$asset === "string")
-      return (
-        <img
-          className="asset"
-          src={imageUrl(value.$asset)}
-          alt={`Asset ${value.$asset}`}
-          loading="lazy"
-        />
-      );
+      return <InlineAsset sha={value.$asset} alt={`Asset ${value.$asset}`} />;
     const hasAsset = (v: Json): boolean =>
       !!v &&
       typeof v === "object" &&
@@ -459,7 +465,9 @@ function App() {
               </div>
               <section>
                 <h2>Input</h2>
-                <Value value={item.input} />
+                <AssetsContext.Provider value={item.assets}>
+                  <Value value={item.input} />
+                </AssetsContext.Provider>
               </section>
               {item.assets.length > 0 && (
                 <section>
@@ -479,7 +487,9 @@ function App() {
               <section>
                 <h2>Output</h2>
                 <pre>{pretty(item.output)}</pre>
-                <ValueImages value={item.output} />
+                <AssetsContext.Provider value={item.assets}>
+                  <ValueImages value={item.output} />
+                </AssetsContext.Provider>
               </section>
               <section className="review">
                 <h2>Your review</h2>
@@ -688,14 +698,7 @@ function App() {
 function ValueImages({ value }: { value: Json }) {
   if (!value || typeof value !== "object") return null;
   if (!Array.isArray(value) && typeof value.$asset === "string")
-    return (
-      <img
-        className="asset"
-        src={imageUrl(value.$asset)}
-        alt="Output asset"
-        loading="lazy"
-      />
-    );
+    return <InlineAsset sha={value.$asset} alt="Output asset" />;
   return (
     <>
       {Object.entries(value).map(([key, child]) => (
