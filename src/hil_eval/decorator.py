@@ -9,6 +9,7 @@ from typing import Any
 
 from .config import DEFAULT_THRESHOLD
 from .context import get_client, logger
+from .selectors import parse_selectors
 from .types import Judgment, RoutedBy, validate_unit
 
 
@@ -24,6 +25,9 @@ def review(
     options: list[str]
     | Callable[[tuple[Any, ...], dict[str, Any], Any], list[str] | None]
     | None = None,
+    assets: list[str] | None = None,
+    name: str | None = None,
+    route: str = "confidence",
 ):
     """Decorate a function so its outputs are judged and low-confidence ones queued.
 
@@ -35,21 +39,43 @@ def review(
     images: argument names whose values are media assets (path str/Path, bytes, PIL).
         Bytes with an image/video/audio signature, PIL images and existing media ``Path`` objects
         are detected automatically; plain strings are only treated as assets here.
+        Kept for compatibility; ``assets`` is the generic spelling.
+    assets: selectors for media values in arguments or the return value, e.g.
+        ``["audio", "output.audio", "output[*].path", "output.results[*].path"]``.
+        The first segment is an argument name or ``output``; ``[*]`` maps over lists
+        (or dict values) and ``[N]`` indexes. Selected strings/Paths/bytes become
+        assets ordered by position; missing keys are ignored.
+    name: ``fn_name`` recorded for items (default ``fn.__qualname__``).
+    route: ``"confidence"`` (default) queues low-confidence plus audited calls;
+        ``"all"`` queues every call (recorded as ``routed_by=audit``).
     """
     if threshold != "auto":
         validate_unit("threshold", threshold)
     validate_unit("audit_rate", audit_rate, allow_none=True)
     if inspect.iscoroutinefunction(judge) or inspect.isasyncgenfunction(judge):
         raise TypeError("Milestone 1 requires a synchronous judge")
+    if route not in ("confidence", "all"):
+        raise ValueError(f"route must be 'confidence' or 'all', got {route!r}")
+    if name is not None and (not isinstance(name, str) or not name):
+        raise ValueError("name must be a non-empty string")
+    selectors = parse_selectors(images, assets)
 
     def decorate(fn):
         if inspect.isgeneratorfunction(fn) or inspect.isasyncgenfunction(fn):
             raise TypeError("Generators are not supported in Milestone 1")
         signature = inspect.signature(fn)
-        unknown = (set(inputs or ()) | set(images or ())) - set(signature.parameters)
+        roots = {root for root, _ in selectors}
+        if "output" in roots and "output" in signature.parameters:
+            raise ValueError(
+                f"{fn.__qualname__} has an argument named 'output'; "
+                "asset selectors rooted at 'output' would be ambiguous"
+            )
+        unknown = (set(inputs or ()) | (roots - {"output"})) - set(signature.parameters)
         if unknown:
             raise ValueError(f"Unknown argument name(s) for {fn.__qualname__}: {sorted(unknown)}")
-        image_names = tuple(images or ())
+        image_names = tuple(roots - {"output"})
+        asset_selectors = tuple(images or ()) + tuple(assets or ())
+        fn_name = name or fn.__qualname__
         rng = random.Random()
         warned_auto = False
 
@@ -69,7 +95,7 @@ def review(
                 )
                 config = client.config(project)
                 rate = config.audit_rate if audit_rate is None else audit_rate
-                audited = rng.random() < rate
+                audited = route == "all" or rng.random() < rate
                 error = None
                 try:
                     judgment = judge(arguments, output)
@@ -111,10 +137,10 @@ def review(
                         judgment=judgment,
                         routed_by=routed,
                         project=project,
-                        fn_name=fn.__qualname__,
+                        fn_name=fn_name,
                         tags=tags,
                         judge_error=error,
-                        images=image_names,
+                        assets=asset_selectors,
                         options=options(args, kwargs, output) if callable(options) else options,
                     )
             except Exception:

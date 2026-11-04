@@ -51,7 +51,7 @@ def test_explicit_image_path_string(tmp_path):
 
     fn(str(path))
     [item] = hil.list_items()
-    assert item.input["image"] == {"$asset": item.assets[0].sha256}
+    assert item.input["image"] == {"$asset": item.assets[0].sha256, "filename": "a.png"}
 
 
 def test_judge_sees_all_args_but_inputs_limits_storage():

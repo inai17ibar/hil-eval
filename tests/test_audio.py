@@ -43,7 +43,8 @@ def test_audio_end_to_end(tmp_path, monkeypatch, data, mime, extension):
         assert transcribe(value) == "transcript"
     for saved in hil.list_items():
         assert saved.assets[0].mime == mime
-        assert saved.input["sound"] == {"$asset": saved.assets[0].sha256}
+        assert saved.input["sound"]["$asset"] == saved.assets[0].sha256
+        assert saved.input["sound"].get("filename") in (None, path.name)
 
     @hil.review(judge=lambda i, o: 0.1, images=["sound"], audit_rate=0)
     def explicit(sound):

@@ -311,7 +311,7 @@ def test_recording_assets_and_input_selection(tmp_path):
     assert fn(path, "exclude") is data
     item = hil.list_items()[0]
     assert set(item.input) == {"image"}
-    assert item.input["image"] == item.output
+    assert item.input["image"] == {**item.output, "filename": "input.png"}
     assert {a.role.value for a in item.assets} == {"input", "output"}
     assert len({a.sha256 for a in item.assets}) == 1
     assert item.tags == {"kind": "image"}

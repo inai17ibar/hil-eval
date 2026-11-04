@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
-from .blobs import is_asset, store_image
+from .blobs import is_asset, store_asset
+from .selectors import apply_path, parse_selectors
 from .store.sqlite import SQLiteStore
 from .types import AssetRole, Item, Judgment, RoutedBy, Status, validate_unit
 
@@ -34,6 +36,15 @@ def sanitize(value):
         return {"__repr__": representation, "__type__": type(value).__qualname__}
 
 
+class _Marked:
+    """A value explicitly selected as an asset (plain strings included)."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value):
+        self.value = value
+
+
 class Client:
     def __init__(self, project, store):
         self.project = project
@@ -60,6 +71,7 @@ class Client:
         judge_label=None,
         images=(),
         options: list[str] | None = None,
+        assets=(),
     ):
         if options is not None and (
             not isinstance(options, list) or any(not isinstance(value, str) for value in options)
@@ -67,20 +79,32 @@ class Client:
             raise ValueError("options must be a list of strings or None")
         project = project or self.project
         self.config(project)
-        assets = []
+        selectors = parse_selectors(images, assets)
+        stored = []
+        counters = {}
 
-        def store_asset(value, role):
+        def keep(value, role):
             try:
-                asset = store_image(value, self.store, role=role)
+                order = counters.get(role, 0)
+                asset = store_asset(value, self.store, role=role, order=order)
             except Exception as exc:  # keep the item; record why the asset is missing
                 logger.warning("Could not store media asset: %s", exc)
                 return {"$asset_error": f"{type(exc).__name__}: {exc}"}
-            assets.append(asset)
-            return {"$asset": asset.sha256}
+            counters[role] = order + 1
+            stored.append(asset)
+            marker = {"$asset": asset.sha256}
+            if isinstance(value, (str, Path)):
+                marker["filename"] = Path(value).name
+            return marker
 
+        # Explicitly selected values are wrapped first, then stored in document
+        # order together with implicitly detected media, so `order` follows
+        # list position (e.g. search rank).
         def capture(value, role):
+            if isinstance(value, _Marked):
+                return keep(value.value, role)
             if is_asset(value):
-                return store_asset(value, role)
+                return keep(value, role)
             if isinstance(value, dict):
                 return {k: capture(v, role) for k, v in value.items()}
             if isinstance(value, (list, tuple)):
@@ -94,19 +118,19 @@ class Client:
             except RecursionError:
                 return sanitize(value)
 
+        for root, path in selectors:
+            if root == "output":
+                output = apply_path(output, path, _Marked)
+            elif root == "input" and not (isinstance(input, dict) and "input" in input):
+                input = apply_path(input, path, _Marked)
+            elif isinstance(input, dict) and root in input:
+                input = {**input, root: apply_path(input[root], path, _Marked)}
+
         item = Item(
             id=uuid4().hex,
             project=project,
             fn_name=fn_name,
-            input=prepare(
-                {
-                    k: (store_asset(v, AssetRole.input) if k in images else v)
-                    for k, v in input.items()
-                }
-                if images and isinstance(input, dict)
-                else input,
-                AssetRole.input,
-            ),
+            input=prepare(input, AssetRole.input),
             output=prepare(output, AssetRole.output),
             confidence=judgment.confidence if judgment else None,
             judge_label=judgment.label if judgment else judge_label,
@@ -117,7 +141,7 @@ class Client:
             tags=sanitize(tags or {}),
             trace_id=trace_id,
             created_at=datetime.now(timezone.utc),
-            assets=assets,
+            assets=stored,
             options=list(options) if options is not None else None,
         )
         return self.store.save_item(item)
@@ -155,8 +179,17 @@ def submit(
     project=None,
     trace_id=None,
     options: list[str] | None = None,
+    assets=None,
+    images=None,
+    name=None,
 ):
-    """Queue an item manually, optionally with choice labels for review."""
+    """Queue an item manually, optionally with choice labels for review.
+
+    assets/images: selectors rooted at ``input`` or ``output`` (or a top-level
+    input key), e.g. ``["output.results[*].path"]``; selected strings/Paths/bytes
+    are stored as media assets. ``images`` is an alias kept for compatibility.
+    name: optional ``fn_name`` shown in the UI and exports.
+    """
     client = get_client()
     if client is None:
         return None
@@ -174,6 +207,9 @@ def submit(
             judge_error=judge_reason,
             judge_label=judge_label,
             options=options,
+            assets=tuple(assets or ()),
+            images=tuple(images or ()),
+            fn_name=name,
         )
     except Exception:
         logger.exception("Failed to submit review item")

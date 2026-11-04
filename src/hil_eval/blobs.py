@@ -122,6 +122,10 @@ def store_asset(
         data = Path(image).read_bytes()
         mime = detect_mime(data, str(image))
     else:
+        if not any(c.__module__.startswith("PIL.") for c in type(image).__mro__):
+            raise TypeError(
+                f"Expected media bytes, path, or PIL.Image.Image, got {type(image).__name__}"
+            )
         from PIL import Image
 
         if not isinstance(image, Image.Image):
