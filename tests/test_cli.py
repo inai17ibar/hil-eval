@@ -130,3 +130,14 @@ def test_missing_typer_message(monkeypatch):
     namespace = runpy.run_path(cli.__file__, run_name="hil_eval._cli_without_typer")
     with pytest.raises(SystemExit, match=r"pip install hil-eval\[cli\]"):
         namespace["main"]()
+
+
+def test_db_option_accepted_after_subcommand(tmp_path):
+    from typer.testing import CliRunner
+
+    from hil_eval.cli import app
+
+    db = str(tmp_path / "hil.db")
+    result = CliRunner().invoke(app, ["projects", "--db", db])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "hil.db").exists()

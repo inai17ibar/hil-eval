@@ -72,7 +72,7 @@ if app is not None:
         port: int = 8765,
         api_key: str | None = typer.Option(None, envvar="HIL_API_KEY"),
         no_browser: bool = False,
-        db: str | None = None,
+        db: str | None = typer.Option(None, help="Override the global database path."),
     ):
         """Serve the UI and open a browser."""
         if not no_browser:
@@ -87,13 +87,14 @@ if app is not None:
         status: Annotated[list[Status] | None, typer.Option("--status")] = None,
         output: str = typer.Option("-", "--output", "-o"),
         no_images: bool = False,
+        db: str | None = typer.Option(None, help="Override the global database path."),
     ):
         """Export reviewed items as JSONL."""
         if fmt not in {"jsonl", "openai-ft", "eval-set"}:
             raise typer.BadParameter("Choose jsonl, openai-ft, or eval-set", param_hint="--format")
         write_jsonl(
             export_items(
-                SQLiteStore(ctx.obj),
+                SQLiteStore(db or ctx.obj),
                 project,
                 fmt=fmt,
                 statuses=status if status is not None else [Status.approved, Status.corrected],
@@ -108,11 +109,12 @@ if app is not None:
         project: str = typer.Option(...),
         target_miss_rate: float | None = typer.Option(None, min=0, max=1),
         apply: bool = False,
+        db: str | None = typer.Option(None, help="Override the global database path."),
     ):
         """Recommend a threshold; optionally persist it."""
         try:
             result = (apply_tuning if apply else recommend_threshold)(
-                SQLiteStore(ctx.obj), project, target_miss_rate=target_miss_rate
+                SQLiteStore(db or ctx.obj), project, target_miss_rate=target_miss_rate
             )
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
@@ -133,17 +135,24 @@ if app is not None:
         )
 
     @app.command()
-    def projects(ctx: typer.Context):
+    def projects(
+        ctx: typer.Context,
+        db: str | None = typer.Option(None, help="Override the global database path."),
+    ):
         """List projects and their configuration."""
         typer.echo("project\tthreshold\ttarget miss rate\taudit rate")
-        for p in SQLiteStore(ctx.obj).list_projects():
+        for p in SQLiteStore(db or ctx.obj).list_projects():
             typer.echo(f"{p.name}\t{p.threshold}\t{p.target_miss_rate}\t{p.audit_rate}")
 
     @app.command()
-    def history(ctx: typer.Context, project: str = typer.Option(...)):
+    def history(
+        ctx: typer.Context,
+        project: str = typer.Option(...),
+        db: str | None = typer.Option(None, help="Override the global database path."),
+    ):
         """Show threshold history."""
         typer.echo("created_at\told\tnew\tn_samples\treview rate\tmiss rate")
-        for h in SQLiteStore(ctx.obj).list_threshold_history(project):
+        for h in SQLiteStore(db or ctx.obj).list_threshold_history(project):
             typer.echo(
                 f"{h.created_at.isoformat()}\t{h.old}\t{h.new}\t{h.n_samples}"
                 f"\t{h.est_review_rate}\t{h.est_miss_rate}"
