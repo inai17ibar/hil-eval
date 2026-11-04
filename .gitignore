@@ -9,3 +9,5 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+src/hil_eval/static/
