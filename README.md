@@ -45,6 +45,27 @@ storage failures are logged and never break your app (fail-open). Async function
 - `audit_rate` routes a random fraction of high-confidence items for unbiased tuning.
 - `hil.submit(input=..., output=..., confidence=...)` enqueues an item manually.
 
+Supply choice labels with `options` for choice review:
+
+```python
+@hil.review(judge=judge, options=["positive", "negative"])
+def classify(text):
+    return model(text)
+
+
+# Dynamic choices receive the original positional args, keyword args, and result.
+@hil.review(judge=judge, options=lambda args, kwargs, result: [result, "other"])
+def suggest(text):
+    return model(text)
+
+
+hil.submit(input="Pick a color", output="red", options=["red", "blue"])
+```
+
+The callback may return `None` to omit choices. It runs only when an item is queued;
+errors are logged without changing the function's result. Choices come from the
+`options` parameter, not the judge.
+
 See `docs/` for the design and roadmap (Japanese).
 
 ## Development

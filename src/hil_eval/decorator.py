@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import random
+from collections.abc import Callable
 from functools import wraps
+from typing import Any
 
 from .config import DEFAULT_THRESHOLD
 from .context import get_client, logger
@@ -11,12 +13,24 @@ from .types import Judgment, RoutedBy, validate_unit
 
 
 def review(
-    judge, threshold=0.8, audit_rate=None, inputs=None, images=None, tags=None, project=None
+    judge,
+    threshold=0.8,
+    audit_rate=None,
+    inputs=None,
+    images=None,
+    tags=None,
+    project=None,
+    *,
+    options: list[str]
+    | Callable[[tuple[Any, ...], dict[str, Any], Any], list[str] | None]
+    | None = None,
 ):
     """Decorate a function so its outputs are judged and low-confidence ones queued.
 
     judge: ``(arguments: dict, output) -> Judgment | float``; receives all bound
         arguments (``self``/``cls`` excluded).
+    options: choice labels, or ``(args, kwargs, result) -> list[str] | None``.
+        Resolved only for queued items; callback failures are logged (fail-open).
     inputs: optional whitelist of argument names to *store* (default: all).
     images: argument names whose values are media assets (path str/Path, bytes, PIL).
         Bytes with an image/video/audio signature, PIL images and existing media ``Path`` objects
@@ -101,6 +115,7 @@ def review(
                         tags=tags,
                         judge_error=error,
                         images=image_names,
+                        options=options(args, kwargs, output) if callable(options) else options,
                     )
             except Exception:
                 logger.exception("Failed to record review item")

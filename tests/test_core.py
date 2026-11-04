@@ -332,3 +332,88 @@ def test_retry_exhaustion(initialized, monkeypatch):
     with pytest.raises(sqlite3.OperationalError):
         initialized.store._run(locked)
     assert len(attempts) == 4
+
+
+@pytest.mark.parametrize("options", [None, [], ["red", "blue"]])
+def test_submit_options(initialized, options):
+    item = hil.submit("color", "red", options=options)
+    assert item.options == options
+    assert initialized.store.get_item(item.id).options == options
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("dynamic", [False, True])
+def test_review_options(initialized, asynchronous, dynamic):
+    calls = []
+
+    def choices(args, kwargs, result):
+        calls.append((args, kwargs, result))
+        return [result, "other"]
+
+    def fn(text, *, suffix="!"):
+        return text + suffix
+
+    async def async_fn(text, *, suffix="!"):
+        return text + suffix
+
+    decorated = hil.review(
+        judge=lambda arguments, output: 0.1,
+        inputs=[],
+        options=choices if dynamic else ["hello?", "other"],
+    )(async_fn if asynchronous else fn)
+    result = decorated("hello", suffix="?")
+    if asynchronous:
+        result = asyncio.run(result)
+    assert result == "hello?"
+    item = hil.list_items()[0]
+    assert item.input == {}
+    assert initialized.store.get_item(item.id).options == ["hello?", "other"]
+    assert calls == ([(("hello",), {"suffix": "?"}, "hello?")] if dynamic else [])
+
+
+def test_review_options_none_and_routing():
+    calls = []
+
+    def choices(args, kwargs, result):
+        calls.append(result)
+        return None
+
+    low = hil.review(judge=lambda i, o: 0, options=choices)(lambda: "low")
+    high = hil.review(judge=lambda i, o: 1, options=choices)(lambda: "high")
+    audited = hil.review(judge=lambda i, o: 1, audit_rate=1, options=["audit"])(lambda: "audit")
+    assert low() == "low"
+    assert high() == "high"
+    assert audited() == "audit"
+    assert calls == ["low"]
+    assert {item.output: item.options for item in hil.list_items()} == {
+        "low": None,
+        "audit": ["audit"],
+    }
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_options_failure_is_fail_open(asynchronous, caplog):
+    result = object()
+
+    def choices(args, kwargs, output):
+        assert output is result
+        raise RuntimeError("choices broke")
+
+    def fn():
+        return result
+
+    async def async_fn():
+        return result
+
+    decorated = hil.review(judge=lambda i, o: 0, options=choices)(async_fn if asynchronous else fn)
+    actual = asyncio.run(decorated()) if asynchronous else decorated()
+    assert actual is result
+    assert hil.list_items() == []
+    assert "choices broke" in caplog.text
+
+
+@pytest.mark.parametrize("options", ["red", [1], lambda *args: ["red"]])
+def test_submit_invalid_options_fail_open(options, caplog):
+    assert hil.submit("color", "red", options=options) is None
+    assert hil.list_items() == []
+    assert "options must be a list of strings or None" in caplog.text

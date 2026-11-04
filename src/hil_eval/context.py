@@ -59,7 +59,12 @@ class Client:
         judge_error=None,
         judge_label=None,
         images=(),
+        options: list[str] | None = None,
     ):
+        if options is not None and (
+            not isinstance(options, list) or any(not isinstance(value, str) for value in options)
+        ):
+            raise ValueError("options must be a list of strings or None")
         project = project or self.project
         self.config(project)
         assets = []
@@ -113,6 +118,7 @@ class Client:
             trace_id=trace_id,
             created_at=datetime.now(timezone.utc),
             assets=assets,
+            options=list(options) if options is not None else None,
         )
         return self.store.save_item(item)
 
@@ -148,7 +154,9 @@ def submit(
     tags=None,
     project=None,
     trace_id=None,
+    options: list[str] | None = None,
 ):
+    """Queue an item manually, optionally with choice labels for review."""
     client = get_client()
     if client is None:
         return None
@@ -165,6 +173,7 @@ def submit(
             trace_id=trace_id,
             judge_error=judge_reason,
             judge_label=judge_label,
+            options=options,
         )
     except Exception:
         logger.exception("Failed to submit review item")
