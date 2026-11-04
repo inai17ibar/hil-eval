@@ -163,7 +163,7 @@ def apply_tuning(store, project, *, target_miss_rate=None):
     """Recommend a threshold, and if it changes anything, persist it."""
     result = recommend_threshold(store, project, target_miss_rate=target_miss_rate)
     if result.recommended != result.current:
-        store.add_threshold_history(
+        store.apply_threshold_change(
             ThresholdHistory(
                 id=uuid4().hex,
                 project=project,
@@ -175,5 +175,4 @@ def apply_tuning(store, project, *, target_miss_rate=None):
                 created_at=datetime.now(timezone.utc),
             )
         )
-        store.update_threshold(project, result.recommended)
     return result

@@ -188,3 +188,27 @@ def test_apply_tuning_is_noop_when_insufficient_data(store):
 def test_unknown_project_raises(store):
     with pytest.raises(ValueError):
         recommend_threshold(store, "does-not-exist")
+
+
+def test_apply_threshold_change_is_atomic_for_unknown_project(tmp_path):
+    from datetime import datetime, timezone
+
+    import pytest
+
+    from hil_eval.store import SQLiteStore
+    from hil_eval.types import ThresholdHistory
+
+    store = SQLiteStore(tmp_path / "hil.db")
+    entry = ThresholdHistory(
+        id="h1",
+        project="nope",
+        old=0.8,
+        new=0.7,
+        n_samples=30,
+        est_review_rate=0.1,
+        est_miss_rate=0.01,
+        created_at=datetime.now(timezone.utc),
+    )
+    with pytest.raises(KeyError):
+        store.apply_threshold_change(entry)
+    assert store.list_threshold_history("nope") == []
