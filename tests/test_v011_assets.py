@@ -134,3 +134,15 @@ def test_submit_assets_and_name(store, tmp_path):
     )
     assert item.fn_name == "manual"
     assert [a.order for a in item.assets] == [0, 1]
+
+
+def test_single_string_selector(store, tmp_path):
+    [path] = wavs(tmp_path, 1)
+
+    @hil.review(judge=lambda a, o: 0.1, audit_rate=0, assets="output.path")
+    def fn():
+        return {"path": path}
+
+    fn()
+    [item] = hil.list_items()
+    assert item.output["path"]["filename"] == "s0.wav"

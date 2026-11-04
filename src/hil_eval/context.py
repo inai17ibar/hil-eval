@@ -207,8 +207,8 @@ def submit(
             judge_error=judge_reason,
             judge_label=judge_label,
             options=options,
-            assets=tuple(assets or ()),
-            images=tuple(images or ()),
+            assets=[assets] if isinstance(assets, str) else tuple(assets or ()),
+            images=[images] if isinstance(images, str) else tuple(images or ()),
             fn_name=name,
         )
     except Exception:

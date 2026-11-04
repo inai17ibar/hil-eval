@@ -13,6 +13,10 @@ from .selectors import parse_selectors
 from .types import Judgment, RoutedBy, validate_unit
 
 
+def _render(path):
+    return "".join(f"[{p}]" if isinstance(p, int) or p == "*" else f".{p}" for p in path)
+
+
 def review(
     judge,
     threshold=0.8,
@@ -74,7 +78,7 @@ def review(
         if unknown:
             raise ValueError(f"Unknown argument name(s) for {fn.__qualname__}: {sorted(unknown)}")
         image_names = tuple(roots - {"output"})
-        asset_selectors = tuple(images or ()) + tuple(assets or ())
+        asset_selectors = tuple(f"{root}{_render(path)}" for root, path in selectors)
         fn_name = name or fn.__qualname__
         rng = random.Random()
         warned_auto = False
