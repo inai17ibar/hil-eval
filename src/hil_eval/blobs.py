@@ -1,0 +1,74 @@
+from __future__ import annotations
+
+import hashlib
+import io
+import mimetypes
+import os
+import tempfile
+from pathlib import Path
+
+from .types import AssetRef, AssetRole
+
+
+def put_blob(directory: Path, sha256: str, data: bytes) -> str:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / sha256
+    if not path.exists():
+        fd, temp = tempfile.mkstemp(dir=directory)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(data)
+            os.replace(temp, path)
+        finally:
+            if os.path.exists(temp):
+                os.unlink(temp)
+    return str(path)
+
+
+def is_image(value):
+    if isinstance(value, (bytes, Path)):
+        return True
+    if isinstance(value, str):
+        return value.startswith(("http://", "https://")) or (
+            mimetypes.guess_type(value)[0] or ""
+        ).startswith("image/")
+    return any(c.__module__.startswith("PIL.") for c in type(value).__mro__)
+
+
+def store_image(image, store=None, *, role=AssetRole.input) -> AssetRef:
+    if store is None:
+        from .context import get_client
+
+        client = get_client()
+        if client is None:
+            raise RuntimeError("hil.init() is required before storing images")
+        store = client.store
+    width = height = None
+    if isinstance(image, bytes):
+        data = image
+        mime = "application/octet-stream"
+        if data.startswith(b"\x89PNG\r\n\x1a\n"):
+            mime = "image/png"
+        elif data.startswith(b"\xff\xd8\xff"):
+            mime = "image/jpeg"
+        elif data.startswith((b"GIF87a", b"GIF89a")):
+            mime = "image/gif"
+        elif data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+            mime = "image/webp"
+    elif isinstance(image, (str, Path)):
+        if str(image).startswith(("http://", "https://")):
+            raise NotImplementedError("Image URLs are not supported in Milestone 1")
+        data = Path(image).read_bytes()
+        mime = mimetypes.guess_type(str(image))[0] or "application/octet-stream"
+    else:
+        from PIL import Image
+
+        if not isinstance(image, Image.Image):
+            raise TypeError("Expected image bytes, path, or PIL.Image.Image")
+        stream = io.BytesIO()
+        image.save(stream, format="PNG")
+        data = stream.getvalue()
+        width, height = image.size
+        mime = "image/png"
+    digest = hashlib.sha256(data).hexdigest()
+    return AssetRef(digest, role, mime, store.put_blob(digest, data, mime), width, height)

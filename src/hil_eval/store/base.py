@@ -1,0 +1,23 @@
+from pathlib import Path
+from typing import Protocol
+
+from ..types import Item, ProjectConfig, Status
+
+
+class Store(Protocol):
+    def ensure_project(
+        self,
+        name: str,
+        *,
+        threshold: float | None,
+        target_miss_rate: float | None,
+        audit_rate: float | None,
+    ) -> ProjectConfig: ...
+    def get_project(self, name: str) -> ProjectConfig | None: ...
+    def update_threshold(self, project: str, threshold: float) -> None: ...
+    def save_item(self, item: Item) -> Item: ...
+    def list_items(
+        self, project: str, *, status: Status | None = None, limit: int = 100, offset: int = 0
+    ) -> list[Item]: ...
+    def put_blob(self, sha256: str, data: bytes, mime: str) -> str: ...
+    def get_blob_path(self, sha256: str) -> Path | None: ...
