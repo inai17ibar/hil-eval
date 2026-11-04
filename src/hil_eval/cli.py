@@ -60,6 +60,19 @@ if app is not None:
         uvicorn.run(application, host=host, port=port)
 
     @app.command()
+    def openapi(output: Path = Path("openapi.yaml")):
+        """Write the HTTP API's OpenAPI contract as YAML."""
+        import tempfile
+
+        import yaml
+
+        from .server.app import create_app
+
+        with tempfile.TemporaryDirectory() as directory:
+            application = create_app(SQLiteStore(Path(directory) / "schema.db"))
+            output.write_text(yaml.safe_dump(application.openapi(), sort_keys=True))
+
+    @app.command()
     def serve(
         ctx: typer.Context,
         host: str = "127.0.0.1",

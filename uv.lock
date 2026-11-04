@@ -131,6 +131,7 @@ image = [
     { name = "pillow", version = "13.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 server = [
+    { name = "pyyaml" },
     { name = "fastapi" },
     { name = "typer" },
     { name = "uvicorn" },
@@ -159,6 +160,7 @@ requires-dist = [
     { name = "pillow", marker = "extra == 'image'" },
     { name = "pyarrow", marker = "extra == 'hf'", specifier = ">=14" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.12" },
+    { name = "pyyaml", marker = "extra == 'server'" },
     { name = "typer", marker = "extra == 'server'", specifier = ">=0.12" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.29" },
 ]

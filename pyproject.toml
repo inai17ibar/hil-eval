@@ -16,7 +16,7 @@ dependencies = []
 [project.optional-dependencies]
 image = ["pillow"]
 cli = ["typer>=0.12"]
-server = ["fastapi>=0.110", "uvicorn>=0.29", "typer>=0.12"]
+server = ["fastapi>=0.110", "uvicorn>=0.29", "typer>=0.12", "pyyaml"]
 hf = ["pyarrow>=14"]
 
 [project.scripts]
