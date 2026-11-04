@@ -1,5 +1,6 @@
 import builtins
 import json
+import re
 
 import pyarrow.parquet as pq
 import pytest
@@ -92,7 +93,7 @@ def test_empty_parquet_and_cli(store, tmp_path):
     result = CliRunner().invoke(
         app, ["--db", str(store.path), "export", "--project", "p", "--format", "hf"]
     )
-    assert result.exit_code != 0 and "--output" in result.output
+    assert result.exit_code != 0 and "--output" in re.sub(r"\x1b\[[0-9;]*m", "", result.output)
 
 
 def test_missing_pyarrow_install_hint(store, tmp_path, monkeypatch):

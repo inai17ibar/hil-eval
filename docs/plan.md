@@ -70,6 +70,6 @@ The expanded M3 in [m3-plan.md](m3-plan.md) supersedes the original three-week-p
 - **状態: ready for v0.1.0**（未 push・未タグ・未公開）
 - v0.1.0 前に残るオーナー作業:
   1. GitHub リポジトリ作成・push・public 化
-  2. PyPI / TestPyPI の trusted publisher 登録（`.github/workflows/publish.yml`、environment `testpypi`）→ TestPyPI で試験公開
+  2. TestPyPI 公開は後回し（決定）。publish.yml は workflow_dispatch のみ。実行前に trusted publisher 登録が必要
   3. `@hil-eval/client` の npm 公開可否と npm スコープ取得
   4. v0.1.0 タグ・リリースノート、PyPI 本番公開

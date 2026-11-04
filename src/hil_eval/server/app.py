@@ -550,7 +550,7 @@ def _mount_static(app: FastAPI, static_dir: str | Path | None) -> None:
 
     if not index_file.is_file():
 
-        @app.get("/{full_path:path}")
+        @app.get("/{full_path:path}", include_in_schema=False)
         def ui_not_built(full_path: str):
             return HTMLResponse(
                 "<html><body><h1>hil-eval UI not built</h1>"
@@ -565,7 +565,7 @@ def _mount_static(app: FastAPI, static_dir: str | Path | None) -> None:
 
     resolved_root = static_root.resolve()
 
-    @app.get("/{full_path:path}")
+    @app.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str):
         candidate = (static_root / full_path).resolve()
         if full_path and candidate.is_relative_to(resolved_root) and candidate.is_file():
