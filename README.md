@@ -58,8 +58,7 @@ storage failures are logged and never break your app (fail-open). Async function
   it accepts the same `assets=` selectors (rooted at `input` or `output`) and `name=`.
 
 ```python
-@hil.review(judge=score_judge, route="all", name="search_text",
-            assets=["output[*].path"])
+@hil.review(judge=score_judge, route="all", name="search_text", assets=["output[*].path"])
 def search(query: str, k: int = 5) -> list[dict]:
     return [{"rank": i + 1, "path": str(p)} for i, p in enumerate(find(query, k))]
 ```
