@@ -118,13 +118,16 @@ class Client:
             except RecursionError:
                 return sanitize(value)
 
+        def mark(value):  # idempotent, so overlapping selectors are harmless
+            return value if isinstance(value, _Marked) else _Marked(value)
+
         for root, path in selectors:
             if root == "output":
-                output = apply_path(output, path, _Marked)
-            elif root == "input" and not (isinstance(input, dict) and "input" in input):
-                input = apply_path(input, path, _Marked)
-            elif isinstance(input, dict) and root in input:
-                input = {**input, root: apply_path(input[root], path, _Marked)}
+                output = apply_path(output, path, mark)
+            elif root == "input":
+                input = apply_path(input, path, mark)
+            elif isinstance(input, dict) and root in input:  # top-level input key shorthand
+                input = {**input, root: apply_path(input[root], path, mark)}
 
         item = Item(
             id=uuid4().hex,

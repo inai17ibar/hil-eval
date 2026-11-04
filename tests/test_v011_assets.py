@@ -121,7 +121,7 @@ def test_route_all_queues_every_call(store):
     for i in range(3):
         fn(i)
     items = hil.list_items()
-    assert len(items) == 3 and {i.routed_by.value for i in items} == {"audit"}
+    assert len(items) == 3 and {i.routed_by.value for i in items} == {"manual"}
 
 
 def test_submit_assets_and_name(store, tmp_path):
@@ -146,3 +146,24 @@ def test_single_string_selector(store, tmp_path):
     fn()
     [item] = hil.list_items()
     assert item.output["path"]["filename"] == "s0.wav"
+
+
+def test_overlapping_selectors_and_submit_input_root(store, tmp_path):
+    [path] = wavs(tmp_path, 1)
+    item = hil.submit(
+        {"input": "text", "audio": path},
+        {"a": path},
+        assets=["output[*]", "output.a", "input.audio"],
+    )
+    assert item.output["a"]["filename"] == "s0.wav"
+    assert item.input == {"input": "text", "audio": item.input["audio"]}
+    assert item.input["audio"]["filename"] == "s0.wav"
+
+
+def test_route_all_records_judge_errors(store):
+    def judge(a, o):
+        raise RuntimeError("boom")
+
+    hil.review(judge=judge, route="all")(lambda x: x)(1)
+    [item] = hil.list_items()
+    assert item.judge_reason.startswith("judge_error")

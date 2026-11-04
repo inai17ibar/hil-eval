@@ -51,7 +51,8 @@ def review(
         assets ordered by position; missing keys are ignored.
     name: ``fn_name`` recorded for items (default ``fn.__qualname__``).
     route: ``"confidence"`` (default) queues low-confidence plus audited calls;
-        ``"all"`` queues every call (recorded as ``routed_by=audit``).
+        ``"all"`` queues every call (recorded as ``routed_by=manual``, so threshold
+        tuning ignores them instead of mis-weighting them as audits).
     """
     if threshold != "auto":
         validate_unit("threshold", threshold)
@@ -78,7 +79,12 @@ def review(
         if unknown:
             raise ValueError(f"Unknown argument name(s) for {fn.__qualname__}: {sorted(unknown)}")
         image_names = tuple(roots - {"output"})
-        asset_selectors = tuple(f"{root}{_render(path)}" for root, path in selectors)
+        # Argument roots are made explicit (input.<arg>) so they cannot collide
+        # with the record-level "input"/"output" roots.
+        asset_selectors = tuple(
+            f"{root if root == 'output' else 'input.' + root}{_render(path)}"
+            for root, path in selectors
+        )
         fn_name = name or fn.__qualname__
         rng = random.Random()
         warned_auto = False
@@ -99,7 +105,7 @@ def review(
                 )
                 config = client.config(project)
                 rate = config.audit_rate if audit_rate is None else audit_rate
-                audited = route == "all" or rng.random() < rate
+                audited = rng.random() < rate
                 error = None
                 try:
                     judgment = judge(arguments, output)
@@ -109,7 +115,7 @@ def review(
                     logger.exception("Review judge failed")
                     judgment = None
                     error = f"judge_error: {exc}"
-                    if not audited:
+                    if not audited and route != "all":
                         return
                 resolved = threshold
                 if threshold == "auto":
@@ -125,8 +131,12 @@ def review(
                         if not warned_auto:
                             logger.info("No stored threshold; using DEFAULT_THRESHOLD=0.8")
                             warned_auto = True
+                # route="all" uses manual so IPW tuning does not reweight
+                # these (selection probability 1) samples as audits.
                 routed = (
-                    RoutedBy.audit
+                    RoutedBy.manual
+                    if route == "all"
+                    else RoutedBy.audit
                     if audited
                     else (
                         RoutedBy.low_conf
