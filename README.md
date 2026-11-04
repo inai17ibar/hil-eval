@@ -1,6 +1,6 @@
 # hil-eval
 
-> Working name. Status: pre-alpha (Milestone 1 of the MVP).
+> Working name. Status: pre-alpha.
 
 Add **human-in-the-loop review** to AI outputs in a few lines: a judge scores every
 output, and only low-confidence items (plus a small random audit sample) land in a
@@ -42,8 +42,7 @@ storage failures are logged and never break your app (fail-open). Async function
 - `audit_rate` routes a random fraction of high-confidence items for unbiased tuning.
 - `hil.submit(input=..., output=..., confidence=...)` enqueues an item manually.
 
-Roadmap: review UI (React), HTTP API, JSONL / OpenAI fine-tuning export, automatic
-threshold tuning. See `docs/` (Japanese).
+See `docs/` for the design and roadmap (Japanese).
 
 ## Development
 
@@ -54,3 +53,44 @@ uv sync && uv run pytest && uv run ruff check . && uv run ruff format --check .
 ## License
 
 MIT
+
+## Review UI and HTTP API
+
+```bash
+pip install 'hil-eval[server,image]'
+python examples/demo_review.py --db .hil/hil.db
+hil-eval serve --db .hil/hil.db
+# Open http://127.0.0.1:8765, or use hil-eval ui to open a browser automatically.
+```
+
+Approve, edit, reject, or skip queued outputs in the UI. `serve --no-ui` runs
+only the API. Use `--api-key` (or `HIL_API_KEY`) when binding a non-loopback host.
+The global `--db` option (or `HIL_DB`) selects the database for every command:
+`hil-eval --db .hil/hil.db projects`. Published wheels include the UI; source
+checkouts need `cd ui && npm ci && npm run build` first.
+
+## Export reviewed data
+
+```bash
+hil-eval export --project demo --format jsonl -o reviews.jsonl
+hil-eval export --project demo --format openai-ft --status corrected -o train.jsonl
+hil-eval export --project demo --format eval-set --no-images -o eval.jsonl
+```
+
+Exports default to approved and corrected items using each item's latest review.
+OpenAI fine-tuning exports embed input images as data URLs; `--no-images` omits
+those images. `-o -` writes to stdout. In Python, `hil.export(fmt="eval-set")`
+returns an iterator of records using the project and store from `hil.init()`.
+
+## Tune thresholds
+
+```bash
+hil-eval tune --project demo --target-miss-rate 0.05
+hil-eval tune --project demo --apply
+hil-eval history --project demo
+```
+
+Tuning reports the current and recommended thresholds, sample count, estimated
+review/miss rates, and the miss-rate upper bound. At least 30 usable reviews are
+required. `--apply` saves the recommendation; `@hil.review(threshold="auto", ...)`
+picks up the saved threshold on subsequent calls.
