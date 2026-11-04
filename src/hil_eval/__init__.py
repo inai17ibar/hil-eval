@@ -15,3 +15,25 @@ __all__ = [
     "ReviewAction",
     "ThresholdHistory",
 ]
+
+
+def export(
+    *, project=None, fmt="jsonl", statuses=(Status.approved, Status.corrected), include_images=True
+):
+    """Iterate exported reviews from the default client's store/project."""
+    from .context import get_client
+    from .exporters import export_items
+
+    client = get_client()
+    if client is None:
+        raise RuntimeError("Call hil.init() before exporting")
+    return export_items(
+        client.store,
+        project or client.project,
+        fmt=fmt,
+        statuses=statuses,
+        include_images=include_images,
+    )
+
+
+__all__.append("export")
