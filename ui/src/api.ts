@@ -33,7 +33,7 @@ export interface Item {
   judge_metadata: Json;
   routed_by: "low_conf" | "audit" | "manual";
   status: Status;
-  tags: string[];
+  tags: Record<string, string>;
   trace_id: string | null;
   created_at: string;
   assets: Asset[];

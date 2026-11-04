@@ -384,9 +384,9 @@ function App() {
                 </p>
               </section>
               <div className="tags">
-                {item.tags.map((tag, index) => (
-                  <span className="badge" key={`${tag}-${index}`}>
-                    {tag}
+                {Object.entries(item.tags ?? {}).map(([key, value]) => (
+                  <span className="badge" key={key}>
+                    {key}: {value}
                   </span>
                 ))}
               </div>
