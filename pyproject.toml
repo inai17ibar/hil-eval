@@ -15,9 +15,10 @@ dependencies = []
 
 [project.optional-dependencies]
 image = ["pillow"]
+server = ["fastapi", "uvicorn"]
 
 [dependency-groups]
-dev = ["pytest", "pytest-asyncio", "ruff", "pillow"]
+dev = ["pytest", "pytest-asyncio", "ruff", "pillow", "fastapi", "uvicorn", "httpx"]
 
 [tool.ruff]
 line-length = 100

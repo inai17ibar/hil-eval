@@ -26,6 +26,13 @@ class AssetRole(str, Enum):
     output = "output"
 
 
+class ReviewAction(str, Enum):
+    approve = "approve"
+    edit = "edit"
+    reject = "reject"
+    skip = "skip"
+
+
 def validate_unit(name: str, value: Any, *, allow_none: bool = False) -> float | None:
     """Validate a finite, non-boolean number in [0, 1] (reject, never clamp)."""
     if value is None and allow_none:
@@ -86,3 +93,27 @@ class ProjectConfig:
     threshold: float | None
     target_miss_rate: float
     audit_rate: float
+
+
+@dataclass(kw_only=True)
+class Review:
+    id: str
+    item_id: str
+    reviewer: str | None
+    action: ReviewAction
+    corrected_output: Any = None
+    judge_correct: bool | None = None
+    note: str | None = None
+    created_at: datetime
+
+
+@dataclass(kw_only=True)
+class ThresholdHistory:
+    id: str
+    project: str
+    old: float | None
+    new: float
+    n_samples: int
+    est_review_rate: float | None
+    est_miss_rate: float | None
+    created_at: datetime
