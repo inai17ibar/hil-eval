@@ -63,3 +63,13 @@ git worktree add ../hil-ci       -b feat/ci          # かぜ
 ## Expanded M3
 
 The expanded M3 in [m3-plan.md](m3-plan.md) supersedes the original three-week-plan M3 milestone row. Phases 1–6 cover the contracts in [ADR 0003](adr/0003-m3-contract.md), webhooks, judges, Parquet exports, OpenAPI/TypeScript client, review UI, and CI/TestPyPI delivery.
+
+## 進捗ステータス（2026-11-04）
+- M1 / M2 完了。M3（m3-plan.md Phase 1–6、H1–H10）実装完了、Codex レビュー指摘 8 件修正済み
+- 検証: pytest 184 / ruff / pyright / UI build / vitest 12 / Playwright 4 / TS client test すべて緑
+- **状態: ready for v0.1.0**（未 push・未タグ・未公開）
+- v0.1.0 前に残るオーナー作業:
+  1. GitHub リポジトリ作成・push・public 化
+  2. PyPI / TestPyPI の trusted publisher 登録（`.github/workflows/publish.yml`、environment `testpypi`）→ TestPyPI で試験公開
+  3. `@hil-eval/client` の npm 公開可否と npm スコープ取得
+  4. v0.1.0 タグ・リリースノート、PyPI 本番公開
