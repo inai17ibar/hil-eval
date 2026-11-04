@@ -1,4 +1,4 @@
-from .base import ItemNotFoundError, Store
+from .base import ItemNotFoundError, ItemSupersededError, Store
 from .sqlite import SQLiteStore
 
-__all__ = ["Store", "SQLiteStore", "ItemNotFoundError"]
+__all__ = ["Store", "SQLiteStore", "ItemNotFoundError", "ItemSupersededError"]

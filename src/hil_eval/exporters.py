@@ -178,6 +178,8 @@ def export_hf(
         values = [r[name] for r in rows]
         try:
             column = pa.array(values)
+            if column.to_pylist() != values:
+                raise ValueError("Arrow conversion changes JSON values")
             if has_empty_struct(column.type):
                 raise ValueError("Parquet does not support empty structs")
         except (pa.ArrowInvalid, pa.ArrowTypeError, ValueError, OverflowError):

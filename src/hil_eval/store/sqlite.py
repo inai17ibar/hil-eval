@@ -25,7 +25,7 @@ from ..types import (
     ThresholdHistory,
     validate_unit,
 )
-from .base import ItemNotFoundError
+from .base import ItemNotFoundError, ItemSupersededError
 
 _ACTION_TO_STATUS = {
     ReviewAction.approve: Status.approved,
@@ -367,6 +367,7 @@ class SQLiteStore:
             raise ValueError("trace_id or tag is required")
 
         def write(db):
+            db.execute("BEGIN IMMEDIATE")
             count = 0
             for item_id, raw in db.execute(
                 "SELECT id, data FROM items WHERE project=? AND status='pending'", (project,)
@@ -392,10 +393,13 @@ class SQLiteStore:
         status = _ACTION_TO_STATUS[review.action]
 
         def write(db):
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT data FROM items WHERE id=?", (review.item_id,)).fetchone()
             if row is None:
                 raise ItemNotFoundError(review.item_id)
             item_data = json.loads(row[0])
+            if item_data["status"] == Status.superseded.value:
+                raise ItemSupersededError(review.item_id)
             item_data["status"] = status.value
             db.execute(
                 "INSERT INTO reviews (id, item_id, created_at, data) VALUES (?, ?, ?, ?)",

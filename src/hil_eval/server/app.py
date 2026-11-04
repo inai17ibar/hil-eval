@@ -4,6 +4,7 @@ import base64
 import binascii
 import hashlib
 import hmac
+import logging
 import math
 import re
 from contextlib import asynccontextmanager
@@ -19,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..blobs import sniff_mime
-from ..store import ItemNotFoundError
+from ..store import ItemNotFoundError, ItemSupersededError
 from ..types import (
     AssetRef,
     AssetRole,
@@ -99,6 +100,87 @@ def _serialize_project(project: ProjectConfig) -> dict:
         "target_miss_rate": project.target_miss_rate,
         "audit_rate": project.audit_rate,
     }
+
+
+class AssetResponse(BaseModel):
+    sha256: str
+    role: AssetRole
+    mime: str
+    order: int
+    video_ts: float | None
+    bbox: tuple[float, float, float, float] | None
+    width: int | None
+    height: int | None
+    url: str
+
+
+class ReviewResponse(BaseModel):
+    id: str
+    item_id: str
+    reviewer: str | None
+    action: ReviewAction
+    corrected_output: Any
+    judge_correct: bool | None
+    note: str | None
+    choice: Any
+    reason_codes: list[str]
+    reason_text: str | None
+    created_at: str
+
+
+class ItemResponse(BaseModel):
+    id: str
+    project: str
+    fn_name: str | None
+    input: Any
+    output: Any
+    confidence: float | None
+    judge_label: str | None
+    judge_reason: str | None
+    judge_metadata: dict[str, Any]
+    routed_by: RoutedBy
+    status: Status
+    tags: dict[str, str]
+    trace_id: str | None
+    created_at: str
+    assets: list[AssetResponse]
+    options: list[Any] | None
+    expires_at: str | None
+
+
+class ItemDetailResponse(ItemResponse):
+    reviews: list[ReviewResponse]
+
+
+class QueueResponse(BaseModel):
+    items: list[ItemResponse]
+    total: int
+
+
+class ProjectResponse(BaseModel):
+    name: str
+    threshold: float | None
+    target_miss_rate: float
+    audit_rate: float
+
+
+class ReasonCodeResponse(BaseModel):
+    project: str
+    code: str
+    label: str | None
+    polarity: str | None
+
+
+class ThresholdResponse(BaseModel):
+    threshold: float | None
+
+
+class SupersedeResponse(BaseModel):
+    superseded: int
+
+
+class HealthResponse(BaseModel):
+    ok: bool
 
 
 class AssetUpload(BaseModel):
@@ -245,15 +327,25 @@ def create_app(
         if api_key is not None and not (_key_matches(x_api_key) or _key_matches(api_key_q)):
             raise HTTPException(status_code=401, detail="missing or invalid API key")
 
-    @app.get("/healthz")
+    def emit(event, project, payload):
+        try:
+            dispatcher.enqueue(event, store.get_project(project), payload)
+        except Exception:
+            logging.getLogger("hil_eval").exception("Webhook enqueue failed")
+
+    @app.get("/healthz", response_model=HealthResponse)
     def healthz():
         return {"ok": True}
 
-    @app.get("/v1/projects", dependencies=[Depends(require_api_key)])
+    @app.get(
+        "/v1/projects",
+        response_model=list[ProjectResponse],
+        dependencies=[Depends(require_api_key)],
+    )
     def list_projects():
         return [_serialize_project(p) for p in store.list_projects()]
 
-    @app.get("/v1/items", dependencies=[Depends(require_api_key)])
+    @app.get("/v1/items", response_model=QueueResponse, dependencies=[Depends(require_api_key)])
     def list_items(
         project: str | None = None,
         status: Annotated[list[Status] | None, Query()] = None,
@@ -285,22 +377,38 @@ def create_app(
         )
         return {"items": [_serialize_item(i) for i in items], "total": total}
 
-    @app.post("/v1/items/supersede", dependencies=[Depends(require_api_key)])
+    @app.post(
+        "/v1/items/supersede",
+        response_model=SupersedeResponse,
+        dependencies=[Depends(require_api_key)],
+    )
     def supersede(body: SupersedeRequest):
         tag = (body.tag_key, body.tag_value) if body.tag_key is not None else None
         return {"superseded": store.supersede_items(body.project, trace_id=body.trace_id, tag=tag)}
 
-    @app.get("/v1/projects/{project}/reason-codes", dependencies=[Depends(require_api_key)])
+    @app.get(
+        "/v1/projects/{project}/reason-codes",
+        response_model=list[ReasonCodeResponse],
+        dependencies=[Depends(require_api_key)],
+    )
     def reason_codes(project: str):
         return [asdict(r) for r in store.list_reason_codes(project)]
 
-    @app.post("/v1/projects/{project}/reason-codes", dependencies=[Depends(require_api_key)])
+    @app.post(
+        "/v1/projects/{project}/reason-codes",
+        response_model=ReasonCodeResponse,
+        dependencies=[Depends(require_api_key)],
+    )
     def register_reason(project: str, body: ReasonCodeRequest):
         entry = ReasonCode(project=project, **body.model_dump())
         store.register_reason_code(entry)
         return asdict(entry)
 
-    @app.get("/v1/projects/{project}/threshold", dependencies=[Depends(require_api_key)])
+    @app.get(
+        "/v1/projects/{project}/threshold",
+        response_model=ThresholdResponse,
+        dependencies=[Depends(require_api_key)],
+    )
     def get_threshold(project: str, tag: str | None = None):
         config = store.get_project(project)
         if config is None:
@@ -312,19 +420,32 @@ def create_app(
             threshold = store.get_tag_threshold(project, *tag.split(":", 1))
         return {"threshold": config.threshold if threshold is None else threshold}
 
-    @app.put("/v1/projects/{project}/threshold", dependencies=[Depends(require_api_key)])
+    @app.put(
+        "/v1/projects/{project}/threshold",
+        response_model=ThresholdResponse,
+        dependencies=[Depends(require_api_key)],
+    )
     def set_threshold(project: str, body: TagThresholdRequest):
         store.set_tag_threshold(TagThreshold(project=project, **body.model_dump()))
         return {"threshold": body.threshold}
 
-    @app.get("/v1/items/{item_id}", dependencies=[Depends(require_api_key)])
+    @app.get(
+        "/v1/items/{item_id}",
+        response_model=ItemDetailResponse,
+        dependencies=[Depends(require_api_key)],
+    )
     def get_item(item_id: str):
         item = store.get_item(item_id)
         if item is None:
             raise HTTPException(status_code=404, detail="item not found")
         return _serialize_item(item, reviews=store.list_reviews(item_id))
 
-    @app.post("/v1/items", status_code=201, dependencies=[Depends(require_api_key)])
+    @app.post(
+        "/v1/items",
+        response_model=ItemResponse,
+        status_code=201,
+        dependencies=[Depends(require_api_key)],
+    )
     def create_item(body: CreateItemRequest):
         store.ensure_project(body.project, threshold=None, target_miss_rate=None, audit_rate=None)
         item = Item(
@@ -362,7 +483,7 @@ def create_app(
                 )
             )
         result = _serialize_item(store.save_item(item))
-        dispatcher.enqueue("item.created", store.get_project(item.project), result)
+        emit("item.created", item.project, result)
         return result
 
     @app.delete("/v1/items/{item_id}", status_code=204, dependencies=[Depends(require_api_key)])
@@ -371,7 +492,11 @@ def create_app(
             raise HTTPException(status_code=404, detail="item not found")
         return Response(status_code=204)
 
-    @app.post("/v1/items/{item_id}/review", dependencies=[Depends(require_api_key)])
+    @app.post(
+        "/v1/items/{item_id}/review",
+        response_model=ItemResponse,
+        dependencies=[Depends(require_api_key)],
+    )
     def review_item(item_id: str, body: ReviewRequest):
         item = store.get_item(item_id)
         if item is None:
@@ -396,11 +521,11 @@ def create_app(
         )
         try:
             store.save_review(review)
+        except ItemSupersededError as exc:
+            raise HTTPException(409, "item is superseded") from exc
         except ItemNotFoundError as exc:
             raise HTTPException(status_code=404, detail="item not found") from exc
-        dispatcher.enqueue(
-            "review.created", store.get_project(item.project), _serialize_review(review)
-        )
+        emit("review.created", item.project, _serialize_review(review))
         return _serialize_item(store.get_item(item_id))
 
     @app.get("/v1/blobs/{sha256}", dependencies=[Depends(require_api_key_header_or_query)])

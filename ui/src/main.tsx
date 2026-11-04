@@ -1,3 +1,4 @@
+import { ReviewControls } from "./ReviewControls";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -189,14 +190,15 @@ function App() {
     if (next) setSelected(next.id);
   }
   function edit() {
-    if (item && !busy) {
+    if (item && item.status !== "superseded" && !busy) {
       setDraft(pretty(item.output));
       setStructuredDraft(item.output);
       setEditing(true);
     }
   }
   async function submit(action: Action, choice?: Json) {
-    if (!item || busy || loading || invalid) return;
+    if (!item || item.status === "superseded" || busy || loading || invalid)
+      return;
     let corrected: Json = draft;
     if (
       action === "edit" &&
@@ -481,7 +483,10 @@ function App() {
               </section>
               <section className="review">
                 <h2>Your review</h2>
-                <fieldset disabled={busy || loading || invalid}>
+                <ReviewControls
+                  status={item.status}
+                  disabled={busy || loading || invalid}
+                >
                   <label>
                     Judge was right?
                     <select
@@ -608,7 +613,7 @@ function App() {
                     </div>
                   )}
                   {busy && <p role="status">Saving review…</p>}
-                </fieldset>
+                </ReviewControls>
               </section>
               <section>
                 <h2>

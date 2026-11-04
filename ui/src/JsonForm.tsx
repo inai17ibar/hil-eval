@@ -68,9 +68,19 @@ export function JsonForm({
     return (
       <label>
         {label}
-        <select value="null" onChange={() => {}}>
-          <option value="null">null</option>
-        </select>
+        <textarea
+          defaultValue="null"
+          aria-label={`${label} JSON value`}
+          onChange={(e) => {
+            try {
+              const next = JSON.parse(e.target.value) as Json;
+              e.target.setCustomValidity("");
+              onChange(next);
+            } catch {
+              e.target.setCustomValidity("Enter valid JSON");
+            }
+          }}
+        />
       </label>
     );
   return (

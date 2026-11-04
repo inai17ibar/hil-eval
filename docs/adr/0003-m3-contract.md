@@ -38,3 +38,13 @@ Parquet normally preserves inferred native Arrow values. Columns containing
 heterogeneous JSON or empty structs fall back to JSON strings (Parquet cannot
 represent these directly). The `hil_eval.json_columns` schema metadata lists
 those columns so readers can decode them without loss. Images are list<binary>.
+
+Automatic routing re-reads thresholds on every call. Matching decorator tags take
+precedence over the project threshold; when multiple tags match, the highest
+threshold wins (the most conservative review policy), independent of tag order.
+With no match, use the project threshold, then DEFAULT_THRESHOLD. An explicit
+numeric decorator threshold overrides both tag and project configuration.
+
+Review and supersede operations acquire a SQLite write transaction before reading
+item state. save_review raises ItemSupersededError for terminal superseded items;
+the HTTP boundary maps this conflict to 409 without inserting a review.

@@ -18,7 +18,7 @@ export interface Review {
 }
 export interface Asset {
   sha256: string;
-  role: string;
+  role: "input" | "output" | "context";
   mime: string;
   width: number | null;
   height: number | null;
@@ -36,7 +36,7 @@ export interface Item {
   confidence: number | null;
   judge_label: string | null;
   judge_reason: string | null;
-  judge_metadata: Json;
+  judge_metadata: Record<string, Json>;
   routed_by: "low_conf" | "audit" | "manual";
   status: Status;
   tags: Record<string, string>;
@@ -46,6 +46,9 @@ export interface Item {
   options: Json[] | null;
   expires_at: string | null;
   reviews?: Review[];
+}
+export interface ItemDetail extends Item {
+  reviews: Review[];
 }
 export interface Project {
   name: string;
@@ -145,7 +148,7 @@ export class HilEvalClient {
     }
     return this.request<Queue>(`/v1/items${query.size ? `?${query}` : ""}`);
   }
-  getItem(id: string) { return this.request<Item>(`/v1/items/${segment(id)}`); }
+  getItem(id: string) { return this.request<ItemDetail>(`/v1/items/${segment(id)}`); }
   createItem(body: CreateItem) { return this.request<Item>("/v1/items", "POST", body); }
   deleteItem(id: string) { return this.request<void>(`/v1/items/${segment(id)}`, "DELETE"); }
   reviewItem(id: string, body: ReviewBody) { return this.request<Item>(`/v1/items/${segment(id)}/review`, "POST", body); }
@@ -158,6 +161,6 @@ export class HilEvalClient {
     const query = tag === undefined ? "" : `?${new URLSearchParams({ tag })}`;
     return this.request<{ threshold: number | null }>(`/v1/projects/${segment(project)}/threshold${query}`);
   }
-  setTagThreshold(project: string, body: TagThreshold) { return this.request<{ threshold: number }>(`/v1/projects/${segment(project)}/threshold`, "PUT", body); }
+  setTagThreshold(project: string, body: TagThreshold) { return this.request<{ threshold: number | null }>(`/v1/projects/${segment(project)}/threshold`, "PUT", body); }
   getBlob(sha256: string) { return this.request<ArrayBuffer>(`/v1/blobs/${segment(sha256)}`, "GET", undefined, true); }
 }

@@ -256,3 +256,78 @@ def test_project_webhook_settings_preserved(store):
     first = store.ensure_project("p", webhook_url="http://local", webhook_secret="secret")
     assert store.ensure_project("p") == first
     assert store.get_project("p") == first
+
+
+def test_supersede_locks_before_reading_and_preserves_review(store, monkeypatch):
+    reviewed = item(store, trace_id="trace")
+    pending = item(store, trace_id="trace")
+    review(store, reviewed)
+    original = store._run
+    statements = []
+
+    def traced(operation):
+        def run(db):
+            db.set_trace_callback(statements.append)
+            return operation(db)
+
+        return original(run)
+
+    monkeypatch.setattr(store, "_run", traced)
+    assert store.supersede_items("p", trace_id="trace") == 1
+    select = next(i for i, sql in enumerate(statements) if sql.startswith("SELECT id, data"))
+    assert "BEGIN IMMEDIATE" in statements[:select]
+    assert store.get_item(reviewed.id).status == Status.approved
+    assert store.get_item(pending.id).status == Status.superseded
+
+
+def test_superseded_review_is_atomic_conflict(store):
+    from hil_eval.store import ItemSupersededError
+
+    i = item(store, trace_id="trace")
+    store.supersede_items("p", trace_id="trace")
+    with pytest.raises(ItemSupersededError):
+        review(store, i)
+    client = TestClient(create_app(store))
+    assert client.post(f"/v1/items/{i.id}/review", json={"action": "approve"}).status_code == 409
+    assert store.list_reviews(i.id) == []
+    assert store.get_item(i.id).status == Status.superseded
+
+
+def test_auto_tag_threshold_precedence_and_live_updates(store, monkeypatch):
+    from hil_eval import context
+    from hil_eval.context import Client
+    from hil_eval.decorator import review as decorate
+
+    store.ensure_project("p", threshold=0.4, audit_rate=0, target_miss_rate=None)
+    client = Client(project="p", store=store)
+    monkeypatch.setattr(context, "_default_client", client)
+    for key, threshold in [("a", 0.3), ("b", 0.8)]:
+        store.set_tag_threshold(
+            TagThreshold(project="p", tag_key=key, tag_value="v", threshold=threshold)
+        )
+    fn = decorate(lambda *_: 0.6, threshold="auto", tags={"b": "v", "a": "v"})(lambda: "result")
+    assert fn() == "result"
+    assert store.count_items("p") == 1
+    store.set_tag_threshold(TagThreshold(project="p", tag_key="b", tag_value="v", threshold=0.5))
+    fn()
+    assert store.count_items("p") == 1
+    decorate(lambda *_: 0.6, threshold=0.9, tags={"a": "v"})(lambda: 1)()
+    assert store.count_items("p") == 2
+
+
+def test_auto_threshold_project_and_default_fallback(store, monkeypatch):
+    from hil_eval import context
+    from hil_eval.context import Client
+    from hil_eval.decorator import review as decorate
+
+    store.ensure_project("p", threshold=0.4, audit_rate=0, target_miss_rate=None)
+    monkeypatch.setattr(context, "_default_client", Client("p", store))
+    fn = decorate(lambda *_: 0.5, threshold="auto", tags={"unknown": "v"})(lambda: 1)
+    fn()
+    assert store.count_items("p") == 0
+    store.update_threshold("p", 0.6)
+    fn()
+    assert store.count_items("p") == 1
+    store.ensure_project("untuned", threshold=None, audit_rate=0, target_miss_rate=None)
+    decorate(lambda *_: 0.7, threshold="auto", project="untuned")(lambda: 1)()
+    assert store.count_items("untuned") == 1

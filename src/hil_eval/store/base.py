@@ -9,6 +9,10 @@ class ItemNotFoundError(LookupError):
     """Raised by ``save_review`` when the target item does not exist."""
 
 
+class ItemSupersededError(ValueError):
+    """Raised when reviewing a terminal superseded item."""
+
+
 class Store(Protocol):
     def ensure_project(
         self,

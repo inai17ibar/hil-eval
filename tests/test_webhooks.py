@@ -118,3 +118,30 @@ def test_enqueue_failure_and_no_url(caplog):
     dispatcher.enqueue("event", None, {"bad": object()})
     assert "enqueue failed" in caplog.text
     assert dispatcher._queue.empty()
+
+
+def test_configuration_lookup_failure_preserves_committed_requests(tmp_path, monkeypatch, caplog):
+    store = SQLiteStore(tmp_path / "db.sqlite")
+    client = TestClient(create_app(store))
+
+    def fail(*args):
+        raise RuntimeError("lookup unavailable")
+
+    monkeypatch.setattr(store, "get_project", fail)
+    created = client.post("/v1/items", json=dict(project="p", input=1, output=2))
+    assert created.status_code == 201
+    item_id = created.json()["id"]
+    assert (
+        client.post(f"/v1/items/{item_id}/review", json=dict(action="approve")).status_code == 200
+    )
+    assert len(store.list_reviews(item_id)) == 1
+    assert "Webhook enqueue failed" in caplog.text
+
+
+def test_full_queue_drops_without_blocking_including_stop(caplog):
+    dispatcher = WebhookDispatcher("http://offline.test", max_queue_size=1)
+    dispatcher.enqueue("first", None, {"x": 1})
+    dispatcher.enqueue("second", None, {"x": 2})
+    assert dispatcher._queue.qsize() == 1
+    assert "queue full" in caplog.text
+    dispatcher.stop()

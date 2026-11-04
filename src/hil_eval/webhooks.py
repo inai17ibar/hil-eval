@@ -18,11 +18,13 @@ _LOG = logging.getLogger("hil_eval")
 
 
 class WebhookDispatcher:
-    def __init__(self, default_url=None, default_secret=None):
+    def __init__(self, default_url=None, default_secret=None, *, max_queue_size: int = 1000):
+        if max_queue_size < 1:
+            raise ValueError("max_queue_size must be positive")
         self.default_url = default_url
         self.default_secret = default_secret
         self.backoff = (1, 5, 15)
-        self._queue: queue.Queue[Any] = queue.Queue()
+        self._queue: queue.Queue[Any] = queue.Queue(maxsize=max_queue_size)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -35,7 +37,10 @@ class WebhookDispatcher:
 
     def stop(self):
         self._stop.set()
-        self._queue.put(None)
+        try:
+            self._queue.put_nowait(None)
+        except queue.Full:
+            pass
         if self._thread is not None:
             self._thread.join(timeout=1)
 
@@ -48,6 +53,8 @@ class WebhookDispatcher:
             if url:
                 body = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
                 self._queue.put_nowait((url, secret, event, body))
+        except queue.Full:
+            _LOG.warning("Webhook event dropped: queue full")
         except Exception:
             _LOG.exception("Webhook enqueue failed")
 

@@ -134,3 +134,14 @@ def test_parquet_mixed_json_fallback_is_documented(store, tmp_path):
     rows = table.to_pylist()
     assert [json.loads(row["input"]) for row in rows] == [1, {"nested": []}]
     assert [json.loads(row["output"]) for row in rows] == [{}, {}]
+
+
+def test_parquet_preserves_absent_keys_nested_and_top_level(store, tmp_path):
+    values = [{"a": 1, "nested": [{"x": 1}]}, {"b": 2, "nested": [{"y": 2}]}]
+    for value in values:
+        review(store, item(store, input=value))
+    path = tmp_path / "keys.parquet"
+    export_hf(store, "p", path)
+    table = pq.read_table(path)
+    assert "input" in json.loads(table.schema.metadata[b"hil_eval.json_columns"])
+    assert [json.loads(row["input"]) for row in table.to_pylist()] == values

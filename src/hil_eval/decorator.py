@@ -69,7 +69,13 @@ def review(
                         return
                 resolved = threshold
                 if threshold == "auto":
-                    resolved = config.threshold
+                    matches = [
+                        value
+                        for key, tag_value in (tags or {}).items()
+                        if (value := client.store.get_tag_threshold(config.name, key, tag_value))
+                        is not None
+                    ]
+                    resolved = max(matches) if matches else config.threshold
                     if resolved is None:
                         resolved = DEFAULT_THRESHOLD
                         if not warned_auto:

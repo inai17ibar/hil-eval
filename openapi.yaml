@@ -1,5 +1,60 @@
 components:
   schemas:
+    AssetResponse:
+      properties:
+        bbox:
+          anyOf:
+          - maxItems: 4
+            minItems: 4
+            prefixItems:
+            - type: number
+            - type: number
+            - type: number
+            - type: number
+            type: array
+          - type: 'null'
+          title: Bbox
+        height:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Height
+        mime:
+          title: Mime
+          type: string
+        order:
+          title: Order
+          type: integer
+        role:
+          $ref: '#/components/schemas/AssetRole'
+        sha256:
+          title: Sha256
+          type: string
+        url:
+          title: Url
+          type: string
+        video_ts:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Video Ts
+        width:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Width
+      required:
+      - sha256
+      - role
+      - mime
+      - order
+      - video_ts
+      - bbox
+      - width
+      - height
+      - url
+      title: AssetResponse
+      type: object
     AssetRole:
       enum:
       - input
@@ -117,6 +172,237 @@ components:
           type: array
       title: HTTPValidationError
       type: object
+    HealthResponse:
+      properties:
+        ok:
+          title: Ok
+          type: boolean
+      required:
+      - ok
+      title: HealthResponse
+      type: object
+    ItemDetailResponse:
+      properties:
+        assets:
+          items:
+            $ref: '#/components/schemas/AssetResponse'
+          title: Assets
+          type: array
+        confidence:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Confidence
+        created_at:
+          title: Created At
+          type: string
+        expires_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Expires At
+        fn_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Fn Name
+        id:
+          title: Id
+          type: string
+        input:
+          title: Input
+        judge_label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Judge Label
+        judge_metadata:
+          additionalProperties: true
+          title: Judge Metadata
+          type: object
+        judge_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Judge Reason
+        options:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Options
+        output:
+          title: Output
+        project:
+          title: Project
+          type: string
+        reviews:
+          items:
+            $ref: '#/components/schemas/ReviewResponse'
+          title: Reviews
+          type: array
+        routed_by:
+          $ref: '#/components/schemas/RoutedBy'
+        status:
+          $ref: '#/components/schemas/Status'
+        tags:
+          additionalProperties:
+            type: string
+          title: Tags
+          type: object
+        trace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Trace Id
+      required:
+      - id
+      - project
+      - fn_name
+      - input
+      - output
+      - confidence
+      - judge_label
+      - judge_reason
+      - judge_metadata
+      - routed_by
+      - status
+      - tags
+      - trace_id
+      - created_at
+      - assets
+      - options
+      - expires_at
+      - reviews
+      title: ItemDetailResponse
+      type: object
+    ItemResponse:
+      properties:
+        assets:
+          items:
+            $ref: '#/components/schemas/AssetResponse'
+          title: Assets
+          type: array
+        confidence:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Confidence
+        created_at:
+          title: Created At
+          type: string
+        expires_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Expires At
+        fn_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Fn Name
+        id:
+          title: Id
+          type: string
+        input:
+          title: Input
+        judge_label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Judge Label
+        judge_metadata:
+          additionalProperties: true
+          title: Judge Metadata
+          type: object
+        judge_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Judge Reason
+        options:
+          anyOf:
+          - items: {}
+            type: array
+          - type: 'null'
+          title: Options
+        output:
+          title: Output
+        project:
+          title: Project
+          type: string
+        routed_by:
+          $ref: '#/components/schemas/RoutedBy'
+        status:
+          $ref: '#/components/schemas/Status'
+        tags:
+          additionalProperties:
+            type: string
+          title: Tags
+          type: object
+        trace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Trace Id
+      required:
+      - id
+      - project
+      - fn_name
+      - input
+      - output
+      - confidence
+      - judge_label
+      - judge_reason
+      - judge_metadata
+      - routed_by
+      - status
+      - tags
+      - trace_id
+      - created_at
+      - assets
+      - options
+      - expires_at
+      title: ItemResponse
+      type: object
+    ProjectResponse:
+      properties:
+        audit_rate:
+          title: Audit Rate
+          type: number
+        name:
+          title: Name
+          type: string
+        target_miss_rate:
+          title: Target Miss Rate
+          type: number
+        threshold:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Threshold
+      required:
+      - name
+      - threshold
+      - target_miss_rate
+      - audit_rate
+      title: ProjectResponse
+      type: object
+    QueueResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ItemResponse'
+          title: Items
+          type: array
+        total:
+          title: Total
+          type: integer
+      required:
+      - items
+      - total
+      title: QueueResponse
+      type: object
     ReasonCodeRequest:
       properties:
         code:
@@ -135,6 +421,31 @@ components:
       required:
       - code
       title: ReasonCodeRequest
+      type: object
+    ReasonCodeResponse:
+      properties:
+        code:
+          title: Code
+          type: string
+        label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Label
+        polarity:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Polarity
+        project:
+          title: Project
+          type: string
+      required:
+      - project
+      - code
+      - label
+      - polarity
+      title: ReasonCodeResponse
       type: object
     ReviewAction:
       enum:
@@ -182,6 +493,69 @@ components:
       - action
       title: ReviewRequest
       type: object
+    ReviewResponse:
+      properties:
+        action:
+          $ref: '#/components/schemas/ReviewAction'
+        choice:
+          title: Choice
+        corrected_output:
+          title: Corrected Output
+        created_at:
+          title: Created At
+          type: string
+        id:
+          title: Id
+          type: string
+        item_id:
+          title: Item Id
+          type: string
+        judge_correct:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Judge Correct
+        note:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Note
+        reason_codes:
+          items:
+            type: string
+          title: Reason Codes
+          type: array
+        reason_text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason Text
+        reviewer:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reviewer
+      required:
+      - id
+      - item_id
+      - reviewer
+      - action
+      - corrected_output
+      - judge_correct
+      - note
+      - choice
+      - reason_codes
+      - reason_text
+      - created_at
+      title: ReviewResponse
+      type: object
+    RoutedBy:
+      enum:
+      - low_conf
+      - audit
+      - manual
+      title: RoutedBy
+      type: string
     Status:
       enum:
       - pending
@@ -216,6 +590,15 @@ components:
       - project
       title: SupersedeRequest
       type: object
+    SupersedeResponse:
+      properties:
+        superseded:
+          title: Superseded
+          type: integer
+      required:
+      - superseded
+      title: SupersedeResponse
+      type: object
     TagThresholdRequest:
       properties:
         tag_key:
@@ -232,6 +615,17 @@ components:
       - tag_value
       - threshold
       title: TagThresholdRequest
+      type: object
+    ThresholdResponse:
+      properties:
+        threshold:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Threshold
+      required:
+      - threshold
+      title: ThresholdResponse
       type: object
     ValidationError:
       properties:
@@ -271,7 +665,8 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
           description: Successful Response
       summary: Healthz
   /v1/blobs/{sha256}:
@@ -390,7 +785,8 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/QueueResponse'
           description: Successful Response
         '422':
           content:
@@ -420,7 +816,8 @@ paths:
         '201':
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/ItemResponse'
           description: Successful Response
         '422':
           content:
@@ -451,7 +848,8 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/SupersedeResponse'
           description: Successful Response
         '422':
           content:
@@ -509,7 +907,8 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/ItemDetailResponse'
           description: Successful Response
         '422':
           content:
@@ -546,7 +945,8 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/ItemResponse'
           description: Successful Response
         '422':
           content:
@@ -571,7 +971,11 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                items:
+                  $ref: '#/components/schemas/ProjectResponse'
+                title: Response List Projects V1 Projects Get
+                type: array
           description: Successful Response
         '422':
           content:
@@ -602,7 +1006,11 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                items:
+                  $ref: '#/components/schemas/ReasonCodeResponse'
+                title: Response Reason Codes V1 Projects  Project  Reason Codes Get
+                type: array
           description: Successful Response
         '422':
           content:
@@ -638,7 +1046,8 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/ReasonCodeResponse'
           description: Successful Response
         '422':
           content:
@@ -677,7 +1086,8 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/ThresholdResponse'
           description: Successful Response
         '422':
           content:
@@ -713,7 +1123,8 @@ paths:
         '200':
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/ThresholdResponse'
           description: Successful Response
         '422':
           content:

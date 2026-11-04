@@ -18,7 +18,7 @@ export interface Review {
 }
 export interface Asset {
   sha256: string;
-  role: string;
+  role: "input" | "output" | "context";
   mime: string;
   width: number | null;
   height: number | null;
@@ -36,7 +36,7 @@ export interface Item {
   confidence: number | null;
   judge_label: string | null;
   judge_reason: string | null;
-  judge_metadata: Json;
+  judge_metadata: Record<string, Json>;
   routed_by: "low_conf" | "audit" | "manual";
   status: Status;
   tags: Record<string, string>;
@@ -46,6 +46,9 @@ export interface Item {
   options: Json[] | null;
   expires_at: string | null;
   reviews?: Review[];
+}
+export interface ItemDetail extends Item {
+  reviews: Review[];
 }
 export interface Project {
   name: string;
@@ -123,7 +126,11 @@ export const api = {
     return request<Queue>(`/v1/items?${params}`, undefined, signal);
   },
   item: (id: string, signal?: AbortSignal) =>
-    request<Item>(`/v1/items/${encodeURIComponent(id)}`, undefined, signal),
+    request<ItemDetail>(
+      `/v1/items/${encodeURIComponent(id)}`,
+      undefined,
+      signal,
+    ),
   review: (id: string, body: ReviewBody) =>
     request<Item>(`/v1/items/${encodeURIComponent(id)}/review`, {
       method: "POST",

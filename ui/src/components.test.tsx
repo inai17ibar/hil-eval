@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { ReviewControls } from "./ReviewControls";
 import { JsonForm, emptyValue } from "./JsonForm";
 import { Diff, wordDiff } from "./Diff";
 import type { Json } from "./api";
@@ -23,7 +24,7 @@ describe("JsonForm", () => {
     expect(html).toContain('type="checkbox"');
     expect(html).toContain("Add rows row");
     expect(html).toContain("Remove rows 1");
-    expect(html).toContain('value="null"');
+    expect(html).toContain("JSON value");
   });
   it("preserves primitive types in new row templates", () => {
     expect(
@@ -84,5 +85,59 @@ describe("Diff", () => {
     expect(html).toContain("<del>old</del>");
     expect(html).toContain("<ins>new</ins>");
     expect(wordDiff("x ".repeat(1000), "y ".repeat(1000))).toHaveLength(2);
+  });
+});
+
+describe("review regression controls", () => {
+  it("disables review actions for superseded items", () => {
+    const html = renderToStaticMarkup(
+      <ReviewControls status="superseded" disabled={false}>
+        <button>Approve</button>
+      </ReviewControls>,
+    );
+    expect(html).toContain('disabled=""');
+    expect(
+      renderToStaticMarkup(
+        <ReviewControls status="pending" disabled={false}>
+          <button>Approve</button>
+        </ReviewControls>,
+      ),
+    ).not.toContain("disabled");
+  });
+  it.each(['"answer"', "42", "true", "[1]", '{"answer":1}'])(
+    "replaces null with JSON %s",
+    (text) => {
+      let result: Json = null;
+      const form = JsonForm({
+        value: null,
+        onChange: (next) => {
+          result = next;
+        },
+      });
+      form.props.children[1].props.onChange({
+        target: { value: text, setCustomValidity: () => {} },
+      });
+      expect(result).toEqual(JSON.parse(text));
+    },
+  );
+  it("rejects invalid JSON without changing the correction", () => {
+    let result: Json = null;
+    let error = "";
+    const form = JsonForm({
+      value: null,
+      onChange: (next) => {
+        result = next;
+      },
+    });
+    form.props.children[1].props.onChange({
+      target: {
+        value: "{",
+        setCustomValidity: (value: string) => {
+          error = value;
+        },
+      },
+    });
+    expect(result).toBeNull();
+    expect(error).toBe("Enter valid JSON");
   });
 });
