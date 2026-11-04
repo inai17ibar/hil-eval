@@ -19,15 +19,18 @@ import hil_eval as hil
 
 hil.init(project="demo", store="sqlite:///.hil/hil.db")
 
+
 def judge(inputs, output):
     return hil.Judgment(confidence=0.4 if "?" in output else 0.95, reason="hedged answer")
+
 
 @hil.review(judge=judge, threshold=0.8, audit_rate=0.0)
 def answer(question: str) -> str:
     return "Maybe 42?" if "life" in question else "Paris"
 
-answer("capital of France")      # high confidence -> not queued
-answer("meaning of life")        # low confidence  -> queued for review
+
+answer("capital of France")  # high confidence -> not queued
+answer("meaning of life")  # low confidence  -> queued for review
 print([(i.input, i.output, i.routed_by.value) for i in hil.list_items()])
 ```
 
