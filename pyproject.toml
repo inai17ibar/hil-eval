@@ -17,12 +17,13 @@ dependencies = []
 image = ["pillow"]
 cli = ["typer>=0.12"]
 server = ["fastapi>=0.110", "uvicorn>=0.29", "typer>=0.12"]
+hf = ["pyarrow>=14"]
 
 [project.scripts]
 hil-eval = "hil_eval.cli:main"
 
 [dependency-groups]
-dev = ["pytest", "pytest-asyncio", "ruff", "pillow", "fastapi", "uvicorn", "httpx", "typer", "pyright"]
+dev = ["pytest", "pytest-asyncio", "ruff", "pillow", "fastapi", "uvicorn", "httpx", "typer", "pyright", "pyarrow", "pyyaml"]
 
 [tool.hatch.build]
 artifacts = ["src/hil_eval/static/**"]

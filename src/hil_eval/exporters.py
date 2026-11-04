@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .store.base import Store
-from .types import AssetRole, Status
+from .types import AssetRole, ReviewAction, Status
 
 
 def _text(value: Any) -> str:
@@ -47,6 +47,8 @@ def export_items(
         if item.status not in selected or (fmt == "openai-ft" and item.status == Status.rejected):
             continue
         expected = review.corrected_output if item.status == Status.corrected else item.output
+        if review.action == ReviewAction.choose:
+            expected = review.choice
         metadata = {
             "id": item.id,
             "project": item.project,
@@ -55,6 +57,9 @@ def export_items(
             "judge_correct": review.judge_correct,
             "tags": item.tags,
             "status": item.status.value,
+            "reason_codes": review.reason_codes,
+            "reason_text": review.reason_text,
+            "choice": review.choice,
         }
         if fmt == "jsonl":
             yield {
@@ -87,10 +92,11 @@ def export_items(
                         }
                     )
             yield {
+                "metadata": metadata,
                 "messages": [
                     {"role": "user", "content": content},
                     {"role": "assistant", "content": _text(expected)},
-                ]
+                ],
             }
 
 
@@ -103,3 +109,87 @@ def write_jsonl(records: Iterable[dict[str, Any]], path: str | Path = "-") -> No
         with Path(path).open("w", encoding="utf-8") as stream:
             for record in records:
                 stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def export_hf(
+    store: Store,
+    project: str,
+    path: str | Path,
+    *,
+    statuses=(Status.approved, Status.corrected),
+    include_images=True,
+) -> None:
+    """Write reviewed JSONL-shaped records and image bytes as Parquet."""
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise ImportError("Parquet export requires pyarrow; pip install hil-eval[hf]") from exc
+    rows = list(export_items(store, project, statuses=statuses, include_images=include_images))
+    images = []
+    for row in rows:
+        item = store.get_item(row["id"])
+        blobs = []
+        if include_images and item is not None:
+            for asset in sorted(item.assets, key=lambda a: a.order):
+                if not asset.mime.startswith("image/"):
+                    continue
+                blob = store.get_blob_path(asset.sha256)
+                if blob is None:
+                    raise FileNotFoundError(f"Missing image blob: {asset.sha256}")
+                blobs.append(blob.read_bytes())
+        images.append(blobs)
+
+    # Native Arrow columns preserve ordinary JSON values. Empty objects and
+    # mixed JSON types cannot be represented by Parquet; only those columns
+    # fall back to JSON text, recorded in schema metadata for lossless decoding.
+    def has_empty_struct(dtype):
+        if pa.types.is_struct(dtype):
+            return not len(dtype) or any(has_empty_struct(f.type) for f in dtype)
+        if pa.types.is_list(dtype):
+            return has_empty_struct(dtype.value_type)
+        return False
+
+    columns = {}
+    json_columns = []
+    names = (
+        list(rows[0])
+        if rows
+        else [
+            "id",
+            "project",
+            "confidence",
+            "judge_label",
+            "judge_correct",
+            "tags",
+            "status",
+            "reason_codes",
+            "reason_text",
+            "choice",
+            "fn_name",
+            "input",
+            "output",
+            "corrected_output",
+            "judge_reason",
+            "created_at",
+        ]
+    )
+    for name in names:
+        values = [r[name] for r in rows]
+        try:
+            column = pa.array(values)
+            if has_empty_struct(column.type):
+                raise ValueError("Parquet does not support empty structs")
+        except (pa.ArrowInvalid, pa.ArrowTypeError, ValueError, OverflowError):
+            column = pa.array([json.dumps(v, ensure_ascii=False) for v in values], type=pa.string())
+            json_columns.append(name)
+        if name == "reason_codes":
+            column = pa.array(values, type=pa.list_(pa.string()))
+        columns[name] = column
+    table = pa.table(columns)
+    if json_columns:
+        table = table.replace_schema_metadata(
+            {b"hil_eval.json_columns": json.dumps(json_columns).encode()}
+        )
+    table = table.append_column("images", pa.array(images, type=pa.list_(pa.binary())))
+    pq.write_table(table, path)
