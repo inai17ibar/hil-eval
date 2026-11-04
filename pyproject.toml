@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hil-eval"
+version = "0.1.0"
+description = "Add human-in-the-loop review of AI outputs in a few lines"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Soichiro Inatani" }]
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+image = ["pillow"]
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio", "ruff", "pillow"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
