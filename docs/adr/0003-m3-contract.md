@@ -70,5 +70,8 @@ media in one document-order pass; `AssetRef.order` is a per-role counter, so lis
 position (e.g. search rank) is preserved. Markers may add `filename` next to
 `$asset`; readers must key on `$asset` only. JSONL/eval-set exports expand markers
 with sha256/mime/filename/path/url; AssetRef, the Store protocol and the HTTP API
-are unchanged. `route="all"` records `routed_by=audit` rather than adding a new
-RoutedBy value, because routing every call is an unbiased sample.
+are unchanged. `route="all"` records `routed_by=manual` rather than adding a new
+RoutedBy value: as audits, IPW tuning would weight above-threshold samples by
+1/audit_rate although their selection probability is 1. The decorator rewrites
+argument roots to `input.<arg>`; at record level `input` always means the whole
+input, and marking is idempotent for overlapping selectors.

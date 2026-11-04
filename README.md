@@ -50,9 +50,9 @@ storage failures are logged and never break your app (fail-open). Async function
   `images=` remains as a backward-compatible alias.
 - `name="search_text"` overrides the recorded `fn_name` (useful for closures,
   whose `__qualname__` contains `<locals>`).
-- `route="all"` queues every call (recorded as `routed_by=audit`, so it also
-  serves as an unbiased tuning sample); the default `route="confidence"` keeps
-  threshold + audit routing.
+- `route="all"` queues every call (recorded as `routed_by=manual`, so threshold
+  tuning ignores these rather than mis-weighting them); the default
+  `route="confidence"` keeps threshold + audit routing.
 - `audit_rate` routes a random fraction of high-confidence items for unbiased tuning.
 - `hil.submit(input=..., output=..., confidence=...)` enqueues an item manually;
   it accepts the same `assets=` selectors (rooted at `input` or `output`) and `name=`.
