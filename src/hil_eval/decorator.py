@@ -9,6 +9,7 @@ from typing import Any
 
 from .config import DEFAULT_THRESHOLD
 from .context import get_client, logger
+from .fields import normalize_fields
 from .selectors import parse_selectors
 from .types import Judgment, RoutedBy, validate_unit
 
@@ -32,6 +33,8 @@ def review(
     assets: list[str] | None = None,
     name: str | None = None,
     route: str = "confidence",
+    path_assets: list[str] | str | None = None,
+    fields: list | None = None,
 ):
     """Decorate a function so its outputs are judged and low-confidence ones queued.
 
@@ -53,6 +56,11 @@ def review(
     route: ``"confidence"`` (default) queues low-confidence plus audited calls;
         ``"all"`` queues every call (recorded as ``routed_by=manual``, so threshold
         tuning ignores them instead of mis-weighting them as audits).
+    path_assets: selectors like ``assets`` whose str/Path values are recorded as
+        absolute path references only (never read, hashed or copied); the review
+        server streams them from ``serve --asset-root`` directories.
+    fields: structured label field schema (list of dicts or ``hil.Field``) for the
+        correction form; values are prefilled from the output (see ``hil.fields``).
     """
     if threshold != "auto":
         validate_unit("threshold", threshold)
@@ -64,12 +72,14 @@ def review(
     if name is not None and (not isinstance(name, str) or not name):
         raise ValueError("name must be a non-empty string")
     selectors = parse_selectors(images, assets)
+    path_selectors = parse_selectors(path_assets)
+    fields = normalize_fields(fields)
 
     def decorate(fn):
         if inspect.isgeneratorfunction(fn) or inspect.isasyncgenfunction(fn):
             raise TypeError("Generators are not supported in Milestone 1")
         signature = inspect.signature(fn)
-        roots = {root for root, _ in selectors}
+        roots = {root for root, _ in selectors + path_selectors}
         if "output" in roots and "output" in signature.parameters:
             raise ValueError(
                 f"{fn.__qualname__} has an argument named 'output'; "
@@ -79,12 +89,17 @@ def review(
         if unknown:
             raise ValueError(f"Unknown argument name(s) for {fn.__qualname__}: {sorted(unknown)}")
         image_names = tuple(roots - {"output"})
+
         # Argument roots are made explicit (input.<arg>) so they cannot collide
         # with the record-level "input"/"output" roots.
-        asset_selectors = tuple(
-            f"{root if root == 'output' else 'input.' + root}{_render(path)}"
-            for root, path in selectors
-        )
+        def explicit(group):
+            return tuple(
+                f"{root if root == 'output' else 'input.' + root}{_render(path)}"
+                for root, path in group
+            )
+
+        asset_selectors = explicit(selectors)
+        path_asset_selectors = explicit(path_selectors)
         fn_name = name or fn.__qualname__
         rng = random.Random()
         warned_auto = False
@@ -155,6 +170,8 @@ def review(
                         tags=tags,
                         judge_error=error,
                         assets=asset_selectors,
+                        path_assets=path_asset_selectors,
+                        fields=fields,
                         options=options(args, kwargs, output) if callable(options) else options,
                     )
             except Exception:

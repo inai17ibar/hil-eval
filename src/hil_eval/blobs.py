@@ -7,7 +7,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from .types import AssetRef, AssetRole
+from .types import AssetKind, AssetRef, AssetRole
 
 
 def put_blob(directory: Path, sha256: str, data: bytes) -> str:
@@ -143,3 +143,57 @@ def store_asset(
 
 def store_image(image, store=None, *, role=AssetRole.input) -> AssetRef:
     return store_asset(image, store, role=role)
+
+
+_MIME_ALIASES = {
+    "audio/x-wav": "audio/wav",
+    "audio/x-aiff": "audio/aiff",
+    "audio/x-flac": "audio/flac",
+}
+
+
+def _within(path: str, root: str) -> bool:
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:  # different drives / mixed absolute and relative
+        return False
+
+
+def resolve_path_asset(path: str, roots) -> tuple[str, Path | None]:
+    """Resolve a recorded path-asset against allowed roots (default deny).
+
+    Returns ``("available", real_path)``, ``("missing", None)`` when the path is
+    allowed but no regular file exists on this machine, or ``("not_allowed", None)``
+    when no root is configured or the path (lexically *or* after resolving symlinks)
+    falls outside every root. Traversal (``..``) and symlink escapes are rejected.
+    """
+    if not roots or not isinstance(path, str) or "\x00" in path or not os.path.isabs(path):
+        return "not_allowed", None
+    lexical = os.path.normpath(path)
+    real = os.path.realpath(lexical)
+    for root in roots:
+        root_lexical = os.path.normpath(os.path.abspath(os.path.expanduser(os.fspath(root))))
+        root_real = os.path.realpath(root_lexical)
+        if _within(lexical, root_lexical) and _within(real, root_real):
+            return ("available", Path(real)) if os.path.isfile(real) else ("missing", None)
+    return "not_allowed", None
+
+
+def path_asset(value, *, role=AssetRole.input, order=0) -> AssetRef:
+    """Reference a media file by absolute path without reading, hashing or copying it.
+
+    The path need not exist on this machine; ``hil-eval serve --asset-root`` resolves
+    it at request time on the machine that has the file.
+    """
+    if isinstance(value, (bytes, bytearray)) or not isinstance(value, (str, Path)):
+        raise TypeError(f"Path assets need a str or Path, got {type(value).__name__}")
+    text = os.fspath(value)
+    if not text or "\x00" in text:
+        raise ValueError("Path assets need a non-empty path without NUL bytes")
+    if text.startswith(("http://", "https://")):
+        raise NotImplementedError("Media URLs are not supported")
+    absolute = os.path.abspath(os.path.expanduser(text))
+    name = os.path.basename(absolute)
+    mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    mime = _MIME_ALIASES.get(mime, mime)
+    return AssetRef(None, role, mime, absolute, order=order, kind=AssetKind.path, filename=name)

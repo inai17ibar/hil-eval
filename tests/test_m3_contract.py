@@ -218,7 +218,7 @@ def test_old_database_migrates(tmp_path, version):
     assert migrated.get_item("old").expires_at is None
     assert migrated.list_reason_codes("p") == []
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
     assert SQLiteStore(path).get_item("old").confidence == 0.2
 
 

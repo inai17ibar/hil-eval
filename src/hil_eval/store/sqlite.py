@@ -12,6 +12,7 @@ from typing import TypeVar
 from ..blobs import put_blob
 from ..config import DEFAULT_AUDIT_RATE, DEFAULT_TARGET_MISS_RATE
 from ..types import (
+    AssetKind,
     AssetRef,
     AssetRole,
     Item,
@@ -37,7 +38,7 @@ _ACTION_TO_STATUS = {
 
 _T = TypeVar("_T")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _item_from_data(data: dict) -> Item:
@@ -47,7 +48,16 @@ def _item_from_data(data: dict) -> Item:
         data["expires_at"] = datetime.fromisoformat(data["expires_at"])
     data["status"] = Status(data["status"])
     data["routed_by"] = RoutedBy(data["routed_by"])
-    data["assets"] = [AssetRef(**{**a, "role": AssetRole(a["role"])}) for a in data["assets"]]
+    data["assets"] = [
+        AssetRef(
+            **{
+                **a,
+                "role": AssetRole(a["role"]),
+                "kind": AssetKind(a.get("kind") or AssetKind.blob.value),
+            }
+        )
+        for a in data["assets"]
+    ]
     return Item(**data)
 
 
@@ -56,6 +66,11 @@ def _review_from_data(data: dict) -> Review:
     data["created_at"] = datetime.fromisoformat(data["created_at"])
     data["action"] = ReviewAction(data["action"])
     return Review(**data)
+
+
+def _project_from_row(row) -> ProjectConfig:
+    *head, fields = row
+    return ProjectConfig(*head, json.loads(fields) if fields else None)
 
 
 def _threshold_history_from_data(data: dict) -> ThresholdHistory:
@@ -95,6 +110,7 @@ class SQLiteStore:
             if version < 1:
                 self._migrate_to_v1(db)
             self._migrate_to_v2(db)
+            self._migrate_to_v3(db)
             db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     def _migrate_to_v2(self, db):
@@ -110,6 +126,12 @@ class SQLiteStore:
         for name in ("webhook_url", "webhook_secret"):
             if name not in columns:
                 db.execute(f"ALTER TABLE projects ADD COLUMN {name} TEXT")
+
+    def _migrate_to_v3(self, db):
+        # v0.2: project-level structured label field schema (JSON).
+        columns = [r[1] for r in db.execute("PRAGMA table_info(projects)")]
+        if "fields" not in columns:
+            db.execute("ALTER TABLE projects ADD COLUMN fields TEXT")
 
     def _migrate_to_v1(self, db):
         # M1 databases predate the `confidence` column on `items` (added to support
@@ -181,8 +203,8 @@ class SQLiteStore:
             for key, value in (("webhook_url", webhook_url), ("webhook_secret", webhook_secret)):
                 if value is not None:
                     db.execute(f"UPDATE projects SET {key}=? WHERE name=?", (value, name))
-            return ProjectConfig(
-                *db.execute("SELECT * FROM projects WHERE name=?", (name,)).fetchone()
+            return _project_from_row(
+                db.execute("SELECT * FROM projects WHERE name=?", (name,)).fetchone()
             )
 
         return self._run(write)
@@ -191,11 +213,24 @@ class SQLiteStore:
         row = self._run(
             lambda db: db.execute("SELECT * FROM projects WHERE name=?", (name,)).fetchone()
         )
-        return ProjectConfig(*row) if row else None
+        return _project_from_row(row) if row else None
 
     def list_projects(self):
         rows = self._run(lambda db: db.execute("SELECT * FROM projects ORDER BY name").fetchall())
-        return [ProjectConfig(*row) for row in rows]
+        return [_project_from_row(row) for row in rows]
+
+    def set_project_fields(self, project, fields):
+        """Store (or clear with ``None``) a project's structured label field schema."""
+
+        def write(db):
+            cur = db.execute(
+                "UPDATE projects SET fields=? WHERE name=?",
+                (json.dumps(fields) if fields is not None else None, project),
+            )
+            if cur.rowcount != 1:
+                raise KeyError(f"unknown project {project!r}")
+
+        self._run(write)
 
     def update_threshold(self, project, threshold):
         validate_unit("threshold", threshold)

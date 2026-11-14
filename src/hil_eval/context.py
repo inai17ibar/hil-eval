@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from .blobs import is_asset, store_asset
+from .blobs import is_asset, path_asset, store_asset
+from .fields import normalize_fields
 from .selectors import apply_path, parse_selectors
 from .store.sqlite import SQLiteStore
 from .types import AssetRole, Item, Judgment, RoutedBy, Status, validate_unit
@@ -45,6 +46,15 @@ class _Marked:
         self.value = value
 
 
+class _PathMarked:
+    """A value selected as a path-reference asset (recorded, never read)."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value):
+        self.value = value
+
+
 class Client:
     def __init__(self, project, store):
         self.project = project
@@ -72,7 +82,14 @@ class Client:
         images=(),
         options: list[str] | None = None,
         assets=(),
+        path_assets=(),
+        fields=None,
+        external_id=None,
+        import_key=None,
     ):
+        if external_id is not None and (not isinstance(external_id, str) or not external_id):
+            raise ValueError("external_id must be a non-empty string or None")
+        fields = normalize_fields(fields)
         if options is not None and (
             not isinstance(options, list) or any(not isinstance(value, str) for value in options)
         ):
@@ -80,18 +97,24 @@ class Client:
         project = project or self.project
         self.config(project)
         selectors = parse_selectors(images, assets)
+        path_selectors = parse_selectors(path_assets)
         stored = []
         counters = {}
 
-        def keep(value, role):
+        def keep(value, role, by_path=False):
             try:
                 order = counters.get(role, 0)
-                asset = store_asset(value, self.store, role=role, order=order)
+                if by_path:
+                    asset = path_asset(value, role=role, order=order)
+                else:
+                    asset = store_asset(value, self.store, role=role, order=order)
             except Exception as exc:  # keep the item; record why the asset is missing
                 logger.warning("Could not store media asset: %s", exc)
                 return {"$asset_error": f"{type(exc).__name__}: {exc}"}
             counters[role] = order + 1
             stored.append(asset)
+            if by_path:
+                return {"$asset_path": asset.path, "filename": asset.filename}
             marker = {"$asset": asset.sha256}
             if isinstance(value, (str, Path)):
                 marker["filename"] = Path(value).name
@@ -101,6 +124,8 @@ class Client:
         # order together with implicitly detected media, so `order` follows
         # list position (e.g. search rank).
         def capture(value, role):
+            if isinstance(value, _PathMarked):
+                return keep(value.value, role, by_path=True)
             if isinstance(value, _Marked):
                 return keep(value.value, role)
             if is_asset(value):
@@ -119,15 +144,21 @@ class Client:
                 return sanitize(value)
 
         def mark(value):  # idempotent, so overlapping selectors are harmless
-            return value if isinstance(value, _Marked) else _Marked(value)
+            return value if isinstance(value, (_Marked, _PathMarked)) else _Marked(value)
 
-        for root, path in selectors:
-            if root == "output":
-                output = apply_path(output, path, mark)
-            elif root == "input":
-                input = apply_path(input, path, mark)
-            elif isinstance(input, dict) and root in input:  # top-level input key shorthand
-                input = {**input, root: apply_path(input[root], path, mark)}
+        def mark_path(value):  # path references win over blob selection
+            if isinstance(value, _PathMarked):
+                return value
+            return _PathMarked(value.value if isinstance(value, _Marked) else value)
+
+        for group, marker in ((selectors, mark), (path_selectors, mark_path)):
+            for root, path in group:
+                if root == "output":
+                    output = apply_path(output, path, marker)
+                elif root == "input":
+                    input = apply_path(input, path, marker)
+                elif isinstance(input, dict) and root in input:  # top-level input key shorthand
+                    input = {**input, root: apply_path(input[root], path, marker)}
 
         item = Item(
             id=uuid4().hex,
@@ -146,6 +177,9 @@ class Client:
             created_at=datetime.now(timezone.utc),
             assets=stored,
             options=list(options) if options is not None else None,
+            fields=fields,
+            external_id=external_id,
+            import_key=import_key,
         )
         return self.store.save_item(item)
 
@@ -157,7 +191,9 @@ def init(
     threshold=None,
     target_miss_rate=None,
     audit_rate=None,
+    fields=None,
 ):
+    """Configure the default client. ``fields`` sets the project's label field schema."""
     global _default_client
     if not store.startswith("sqlite:///"):
         raise ValueError("Milestone 1 supports only sqlite:/// URLs")
@@ -168,7 +204,19 @@ def init(
     backend.ensure_project(
         project, threshold=threshold, target_miss_rate=target_miss_rate, audit_rate=audit_rate
     )
+    if fields is not None:
+        backend.set_project_fields(project, normalize_fields(fields))
     _default_client = Client(project, backend)
+
+
+def set_fields(fields, *, project=None):
+    """Set (or clear with ``None``) a project's structured label field schema."""
+    client = get_client()
+    if client is None:
+        raise RuntimeError("Call hil.init() before setting fields")
+    name = project or client.project
+    client.config(name)
+    client.store.set_project_fields(name, normalize_fields(fields))
 
 
 def submit(
@@ -185,8 +233,17 @@ def submit(
     assets=None,
     images=None,
     name=None,
+    path_assets=None,
+    fields=None,
+    external_id=None,
 ):
     """Queue an item manually, optionally with choice labels for review.
+
+    path_assets: selectors like ``assets`` whose str/Path values are recorded as
+        absolute path references only (no read, hash or copy). The serving machine
+        plays them when the path is under ``serve --asset-root``.
+    fields: structured label field schema for this item (overrides the project's).
+    external_id: your stable id for the item (e.g. a file id); exported as-is.
 
     assets/images: selectors rooted at ``input`` or ``output`` (or a top-level
     input key), e.g. ``["output.results[*].path"]``; selected strings/Paths/bytes
@@ -212,6 +269,9 @@ def submit(
             options=options,
             assets=[assets] if isinstance(assets, str) else tuple(assets or ()),
             images=[images] if isinstance(images, str) else tuple(images or ()),
+            path_assets=[path_assets] if isinstance(path_assets, str) else tuple(path_assets or ()),
+            fields=fields,
+            external_id=external_id,
             fn_name=name,
         )
     except Exception:

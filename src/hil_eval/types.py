@@ -61,9 +61,17 @@ class Judgment:
         validate_unit("confidence", self.confidence)
 
 
+class AssetKind(str, Enum):
+    blob = "blob"  # bytes copied into the content-addressed blob store
+    path = "path"  # reference to a file path, resolved by the serving machine
+
+
 @dataclass
 class AssetRef:
-    sha256: str
+    """A media asset. ``kind='path'`` assets have ``sha256=None`` and ``path`` is the
+    recorded absolute source path (never read at enqueue time)."""
+
+    sha256: str | None
     role: AssetRole
     mime: str
     path: str
@@ -72,6 +80,8 @@ class AssetRef:
     order: int = 0
     video_ts: float | None = None
     bbox: list[float] | None = None
+    kind: AssetKind = AssetKind.blob
+    filename: str | None = None
 
 
 @dataclass
@@ -93,6 +103,9 @@ class Item:
     assets: list[AssetRef] = field(default_factory=list)
     options: list[Any] | None = None
     expires_at: datetime | None = None
+    fields: list[dict[str, Any]] | None = None
+    external_id: str | None = None
+    import_key: str | None = None
 
 
 @dataclass
@@ -103,6 +116,7 @@ class ProjectConfig:
     audit_rate: float
     webhook_url: str | None = None
     webhook_secret: str | None = None
+    fields: list[dict[str, Any]] | None = None
 
 
 @dataclass(kw_only=True)
@@ -118,6 +132,8 @@ class Review:
     judge_correct: bool | None = None
     note: str | None = None
     created_at: datetime
+    fields: dict[str, Any] | None = None
+    field_diff: dict[str, Any] | None = None
 
 
 @dataclass(kw_only=True)
