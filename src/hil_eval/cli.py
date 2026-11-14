@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
@@ -32,7 +33,26 @@ if app is not None:
     ):
         ctx.obj = db
 
-    def _serve(db, host, port, api_key, no_ui, webhook_url=None, webhook_secret=None):
+    def _asset_roots(values):
+        # Read the env var ourselves: click splits list env vars on whitespace,
+        # which would break paths such as "/Volumes/Extreme SSD".
+        if not values and os.environ.get("HIL_ASSET_ROOTS"):
+            values = os.environ["HIL_ASSET_ROOTS"].split(os.pathsep)
+        roots = []
+        for value in values or []:
+            if not value:
+                continue
+            root = Path(value).expanduser()
+            if not root.is_absolute():
+                root = root.resolve()
+            if not root.is_dir():
+                typer.echo(f"Warning: asset root {str(root)!r} is not a directory (yet).", err=True)
+            roots.append(str(root))
+        return roots
+
+    def _serve(
+        db, host, port, api_key, no_ui, webhook_url=None, webhook_secret=None, asset_roots=()
+    ):
         import uvicorn
 
         from .server.app import create_app
@@ -50,7 +70,10 @@ if app is not None:
             static_dir=static,
             webhook_url=webhook_url,
             webhook_secret=webhook_secret,
+            asset_roots=asset_roots,
         )
+        if asset_roots:
+            typer.echo("Serving path assets under: " + ", ".join(asset_roots), err=True)
         if no_ui:
             application.router.routes[:] = [
                 r
@@ -82,9 +105,27 @@ if app is not None:
         webhook_url: str | None = typer.Option(None, envvar="HIL_WEBHOOK_URL"),
         webhook_secret: str | None = typer.Option(None, envvar="HIL_WEBHOOK_SECRET"),
         db: str | None = typer.Option(None, help="Override the global database path."),
+        asset_root: Annotated[
+            list[str] | None,
+            typer.Option(
+                "--asset-root",
+                help="Directory whose files path-reference assets may stream from "
+                "(repeatable; default: none). Paths outside every root are refused. "
+                "Env: HIL_ASSET_ROOTS (os.pathsep-separated).",
+            ),
+        ] = None,
     ):
         """Serve the review UI and HTTP API."""
-        _serve(db or ctx.obj, host, port, api_key, no_ui, webhook_url, webhook_secret)
+        _serve(
+            db or ctx.obj,
+            host,
+            port,
+            api_key,
+            no_ui,
+            webhook_url,
+            webhook_secret,
+            _asset_roots(asset_root),
+        )
 
     @app.command()
     def ui(
@@ -94,11 +135,20 @@ if app is not None:
         api_key: str | None = typer.Option(None, envvar="HIL_API_KEY"),
         no_browser: bool = False,
         db: str | None = typer.Option(None, help="Override the global database path."),
+        asset_root: Annotated[
+            list[str] | None,
+            typer.Option(
+                "--asset-root",
+                help="Directory whose files path-reference assets may stream from "
+                "(repeatable; default: none). Paths outside every root are refused. "
+                "Env: HIL_ASSET_ROOTS (os.pathsep-separated).",
+            ),
+        ] = None,
     ):
         """Serve the UI and open a browser."""
         if not no_browser:
             webbrowser.open(f"http://{host}:{port}")
-        _serve(db or ctx.obj, host, port, api_key, False)
+        _serve(db or ctx.obj, host, port, api_key, False, asset_roots=_asset_roots(asset_root))
 
     @app.command("export")
     def export_command(
