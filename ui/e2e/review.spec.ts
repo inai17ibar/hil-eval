@@ -225,10 +225,7 @@ test("path assets stream from the asset root or explain why not", async ({
   await expect(page.getByText("File not found on this machine")).toBeVisible();
 });
 
-test("choices confirm labels as proposed and wait while labels are edited", async ({
-  page,
-  request,
-}) => {
+test("mark unsure while correcting labels", async ({ page, request }) => {
   const item = await seed(request, {
     project: "labels-e2e",
     output: {
@@ -242,21 +239,54 @@ test("choices confirm labels as proposed and wait while labels are edited", asyn
     options: ["correct", "unsure"],
   });
   await page.goto(`/items/${item.id}`);
+  // flags replace the separate choice buttons
+  await expect(page.getByRole("button", { name: /^Choose / })).toHaveCount(0);
   await page
     .getByRole("radiogroup", { name: "type" })
     .getByRole("radio", { name: "one_shot" })
     .click();
-  await expect(
-    page.getByRole("button", { name: 'Choose "unsure"' }),
-  ).toBeDisabled();
-  await page.keyboard.press("u");
   await page.locator("h1").first().click();
-  await page.keyboard.press("u");
-  await page.getByRole("button", { name: 'Choose "unsure"' }).click();
+  await page.keyboard.press("?");
+  const unsure = page
+    .getByRole("group", { name: "Mark result as" })
+    .getByRole("button", { name: /unsure/ });
+  await expect(unsure).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByRole("button", { name: /Save 1 correction · unsure/ }),
+  ).toBeVisible();
+  await page.keyboard.press("Enter");
   await expect
     .poll(() => latestReview(request, item.id))
     .toMatchObject({
-      action: "choose",
+      action: "edit",
+      choice: "unsure",
+      field_diff: { type: { from: "loop", to: "one_shot" } },
+    });
+});
+
+test("flag without changes confirms the labels", async ({ page, request }) => {
+  const item = await seed(request, {
+    project: "labels-e2e",
+    output: {
+      family: "drums",
+      leaf: "kick",
+      type: "loop",
+      bpm: 100,
+      key: null,
+    },
+    fields: LABEL_FIELDS,
+    options: ["unsure"],
+  });
+  await page.goto(`/items/${item.id}`);
+  await page
+    .getByRole("group", { name: "Mark result as" })
+    .getByRole("button", { name: /unsure/ })
+    .click();
+  await page.getByRole("button", { name: /Confirm all · unsure/ }).click();
+  await expect
+    .poll(() => latestReview(request, item.id))
+    .toMatchObject({
+      action: "approve",
       choice: "unsure",
       field_diff: {},
     });

@@ -104,11 +104,17 @@ function App() {
   const [judge, setJudge] = useState("");
   const [note, setNote] = useState("");
   const [labels, setLabels] = useState<Values>({});
+  // Verdict flag (one of item.options, e.g. "unsure") saved next to the fields.
+  const [flag, setFlag] = useState<Json>(null);
   const fields = item?.fields?.length ? item.fields : null;
   const proposed: Values = item?.proposed_fields ?? {};
   const changed = fields ? changedFields(proposed, labels) : [];
   const labelErrors = fields ? fieldErrors(fields, proposed, labels) : {};
   const labelsInvalid = Object.keys(labelErrors).length > 0;
+  const flags = fields ? (item?.options ?? []) : [];
+  const unsureFlag = flags.find(
+    (o) => typeof o === "string" && /unsure|uncertain|not.?sure/i.test(o),
+  );
   const invalid =
     [filters.min, filters.max].some(
       (v) =>
@@ -174,6 +180,7 @@ function App() {
       .item(selected, c.signal)
       .then((loaded) => {
         setLabels(loaded.proposed_fields ?? {});
+        setFlag(null);
         setItem(loaded);
       })
       .catch((e) => {
@@ -229,8 +236,8 @@ function App() {
   async function submit(action: Action, choice?: Json) {
     if (!item || item.status === "superseded" || busy || loading || invalid)
       return;
-    // With a field schema, approve/choose carry the label form; any change turns
-    // "approve" into a structured correction ("edit" with fields).
+    // With a field schema, approve carries the label form plus the optional flag;
+    // the server derives approve/edit from the field diff.
     const withFields =
       !!fields && !editing && action !== "reject" && action !== "skip";
     if (withFields && labelsInvalid) {
@@ -239,7 +246,6 @@ function App() {
       return;
     }
     if (withFields && action === "approve" && changed.length) action = "edit";
-    if (withFields && action === "choose" && changed.length) return; // server rejects it
     let corrected: Json = draft;
     if (
       action === "edit" &&
@@ -265,6 +271,7 @@ function App() {
         judge_correct: judge === "" ? null : judge === "yes",
         ...(note ? { note } : {}),
         ...(withFields ? { fields: labels } : {}),
+        ...(withFields && flag !== null ? { choice: flag } : {}),
         ...(action === "edit" && !withFields
           ? { corrected_output: corrected }
           : {}),
@@ -335,6 +342,9 @@ function App() {
       }
       const actions: Record<string, () => void> = {
         u: () => fields && setLabels(proposed),
+        "?": () =>
+          unsureFlag !== undefined &&
+          setFlag((f) => (f === unsureFlag ? null : unsureFlag)),
         j: () => move(1),
         k: () => move(-1),
         a: () => void submit("approve"),
@@ -560,6 +570,32 @@ function App() {
                       onChange={setLabels}
                     />
                     <div className="label-actions">
+                      {flags.length > 0 && (
+                        <div
+                          className="label-flags"
+                          role="group"
+                          aria-label="Mark result as"
+                        >
+                          <span className="muted">Mark:</span>
+                          {flags.map((option, i) => (
+                            <button
+                              type="button"
+                              key={i}
+                              className={`chip flag${flag === option ? " selected" : ""}`}
+                              aria-pressed={flag === option}
+                              onClick={() =>
+                                setFlag((f) => (f === option ? null : option))
+                              }
+                            >
+                              {flag === option ? "✓ " : ""}
+                              {typeof option === "string"
+                                ? option
+                                : pretty(option)}
+                              {option === unsureFlag && <kbd>?</kbd>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <span className="label-summary" aria-live="polite">
                         {changed.length
                           ? `Changed: ${changed.join(", ")}`
@@ -580,7 +616,9 @@ function App() {
                       >
                         {changed.length
                           ? `Save ${changed.length} correction${changed.length > 1 ? "s" : ""}`
-                          : "✓ Confirm all"}{" "}
+                          : "✓ Confirm all"}
+                        {flag !== null &&
+                          ` · ${typeof flag === "string" ? flag : pretty(flag)}`}{" "}
                         <kbd>Enter</kbd>
                       </button>
                     </div>
@@ -661,17 +699,11 @@ function App() {
                       onChange={(e) => setReasonText(e.target.value)}
                     />
                   </label>
-                  {!!item.options?.length && (
+                  {!fields && !!item.options?.length && (
                     <div className="actions" aria-label="Choices">
-                      {changed.length > 0 && (
-                        <p className="muted choice-hint">
-                          Save or reset the label corrections to pick a choice.
-                        </p>
-                      )}
                       {item.options.map((option, i) => (
                         <button
                           key={i}
-                          disabled={changed.length > 0}
                           onClick={() => void submit("choose", option)}
                         >
                           Choose {pretty(option)}
@@ -811,7 +843,7 @@ function App() {
         </span>
         <span>
           <kbd>1–9</kbd> label field · <kbd>Enter</kbd> confirm / save labels ·{" "}
-          <kbd>u</kbd> reset labels
+          <kbd>u</kbd> reset labels · <kbd>?</kbd> mark unsure
         </span>
         <span>
           <kbd>e</kbd> edit

@@ -657,8 +657,32 @@ del {
     min-height: 46px;
   }
 }
-.choice-hint {
+.label-actions {
+  flex-wrap: wrap;
+}
+.label-flags {
   flex-basis: 100%;
-  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.label-flags .muted {
   font-size: 13px;
+  flex: none;
+}
+.chip.flag {
+  flex: none;
+  min-height: 34px;
+  padding: 4px 12px;
+  font-size: 14px;
+}
+.chip.flag.selected {
+  background: #6b3fa0;
+  border-color: #6b3fa0;
+}
+.chip.flag kbd {
+  margin-left: 6px;
+  font-size: 11px;
 }
