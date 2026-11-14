@@ -145,6 +145,15 @@ def normalize_fields(fields: Any) -> list[dict[str, Any]] | None:
             raise FieldError(f"field {spec.name!r}: label must be a string")
         names.append(spec.name)
         result.append(spec.to_dict())
+    # Writing corrections back must be unambiguous: no shared or nested paths.
+    paths = [(f["name"], (f.get("path") or f["name"]).split(".")) for f in result]
+    for i, (name, path) in enumerate(paths):
+        if any(not part for part in path):
+            raise FieldError(f"field {name!r}: path has an empty segment")
+        for other, other_path in paths[:i]:
+            shorter = min(len(path), len(other_path))
+            if path[:shorter] == other_path[:shorter]:
+                raise FieldError(f"fields {other!r} and {name!r} have overlapping paths")
     return result
 
 

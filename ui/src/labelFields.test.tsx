@@ -7,6 +7,7 @@ import {
   choicesFor,
   fieldErrors,
   filterChoices,
+  resetField,
   same,
   setValue,
 } from "./labelFields";
@@ -83,6 +84,18 @@ describe("label field logic", () => {
     expect(setValue(FIELDS, PROPOSED, "family", "drums").leaf).toBe("kick");
     const open = [FIELDS[0], { ...FIELDS[1], allow_custom: true }];
     expect(setValue(open, PROPOSED, "family", "bass").leaf).toBe("808");
+  });
+  it("resets a parent and restores dependents that no longer fit", () => {
+    const edited = { ...PROPOSED, family: "keys", leaf: "piano", bpm: 50 };
+    const reset = resetField(FIELDS, edited, PROPOSED, "family");
+    expect(reset).toEqual({ ...PROPOSED, bpm: 50 });
+    const kept = resetField(
+      FIELDS,
+      { ...PROPOSED, leaf: "snare" },
+      PROPOSED,
+      "family",
+    );
+    expect(kept.leaf).toBe("snare");
   });
   it("validates only changed fields", () => {
     expect(

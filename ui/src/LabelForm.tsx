@@ -6,6 +6,7 @@ import {
   display,
   fieldErrors,
   filterChoices,
+  resetField,
   same,
   setValue,
   type Values,
@@ -64,7 +65,7 @@ export function LabelForm({
                     className="reset"
                     aria-label={`Reset ${field.label ?? field.name}`}
                     onClick={() =>
-                      onChange({ ...values, [field.name]: original })
+                      onChange(resetField(fields, values, proposed, field.name))
                     }
                   >
                     ↺

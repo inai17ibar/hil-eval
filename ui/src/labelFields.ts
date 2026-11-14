@@ -108,3 +108,30 @@ export function display(value: Json | undefined): string {
   if (value === null || value === undefined) return "—";
   return typeof value === "string" ? value : JSON.stringify(value);
 }
+
+/**
+ * Reset one field to its proposed value. Dependents (transitively) that no longer
+ * fit the restored parent go back to their proposed values too.
+ */
+export function resetField(
+  fields: FieldDefinition[],
+  values: Values,
+  proposed: Values,
+  name: string,
+): Values {
+  const next: Values = { ...values, [name]: proposed[name] ?? null };
+  const touched = [name];
+  for (const field of fields) {
+    if (!field.depends_on || !touched.includes(field.depends_on)) continue;
+    const current = next[field.name];
+    if (
+      current !== null &&
+      current !== undefined &&
+      !choicesFor(field, next).includes(String(current))
+    ) {
+      next[field.name] = proposed[field.name] ?? null;
+      touched.push(field.name);
+    }
+  }
+  return next;
+}

@@ -71,6 +71,12 @@ def test_normalize_accepts_dicts_and_field_objects():
         [{"name": "a", "choices": ["x"], "bogus": 1}],
         [{"name": "a", "choices": ["x"], "min": 1}],
         [{"name": "n", "kind": "number", "multipliers": [0]}],
+        [{"name": "a", "kind": "text"}, {"name": "b", "kind": "text", "path": "a"}],
+        [
+            {"name": "m", "kind": "text", "path": "meta"},
+            {"name": "k", "kind": "text", "path": "meta.k"},
+        ],
+        [{"name": "a", "kind": "text", "path": "x..y"}],
     ],
 )
 def test_normalize_rejects_invalid_schemas(bad):

@@ -176,7 +176,12 @@ test("correct only the wrong fields with chips and keyboard", async ({
     page.getByRole("button", { name: /Save 3 corrections/ }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Reset family" }).click();
-  await expect(page.locator(".label-row.changed")).toHaveCount(2);
+  // resetting the parent also restores the child that no longer fits
+  await expect(page.locator(".label-row.changed")).toHaveCount(1);
+  await expect(page.getByRole("radio", { name: "kick" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
   await family.getByRole("radio", { name: "keys" }).click();
   await page.getByRole("radio", { name: "rhodes" }).click();
   await page.getByRole("button", { name: /Save 3 corrections/ }).click();
