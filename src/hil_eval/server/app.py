@@ -647,17 +647,17 @@ def create_app(
                 raise HTTPException(422, "item has no field schema")
             if action not in (ReviewAction.approve, ReviewAction.edit, ReviewAction.choose):
                 raise HTTPException(422, "fields are only accepted with approve, edit or choose")
+            if body.choice is not None and item.options and body.choice not in item.options:
+                raise HTTPException(422, "choice must be one of item options")
             try:
                 corrected_fields, diff = check_values(schema, item.output, body.fields)
             except FieldError as exc:
                 raise HTTPException(422, str(exc)) from exc
-            if action in (ReviewAction.approve, ReviewAction.choose) and diff:
-                raise HTTPException(
-                    422, f"{action.value} cannot change fields; use action 'edit' to correct"
-                )
-            if action == ReviewAction.edit and not diff and corrected_output is None:
-                action = ReviewAction.approve  # nothing changed: record a confirmation
-            elif action == ReviewAction.edit:
+            # Structured reviews: the action (and so the status) is derived from the
+            # fields -- approve when nothing changed, edit otherwise. A choice is kept
+            # verbatim as a verdict flag next to the fields (e.g. "unsure").
+            if diff or corrected_output is not None:
+                action = ReviewAction.edit
                 # Fields are authoritative: merge them into the item output, or into
                 # an explicitly supplied corrected_output, so exports never disagree.
                 base = item.output if corrected_output is None else corrected_output
@@ -665,6 +665,8 @@ def create_app(
                     corrected_output = apply_values(schema, base, corrected_fields)
                 except FieldError as exc:
                     raise HTTPException(422, str(exc)) from exc
+            else:
+                action = ReviewAction.approve
         review = Review(
             id=uuid4().hex,
             item_id=item_id,

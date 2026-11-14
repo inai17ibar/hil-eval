@@ -197,7 +197,6 @@ def test_api_review_with_fields_end_to_end(store):
     assert created["external_id"] == "f-1"
 
     url = f"/v1/items/{created['id']}/review"
-    assert client.post(url, json={"action": "approve", "fields": {"bpm": 50}}).status_code == 422
     assert client.post(url, json={"action": "edit", "fields": {"bpm": 999}}).status_code == 422
     assert client.post(url, json={"action": "reject", "fields": {}}).status_code == 422
     response = client.post(
@@ -229,7 +228,7 @@ def test_api_review_with_fields_end_to_end(store):
     assert ft["metadata"]["field_diff"]["key"]["to"] == "C major"
 
 
-def test_edit_without_changes_is_approve_and_choose_only_confirms_fields(store):
+def test_action_is_derived_from_fields_and_choice_is_a_flag(store):
     client = make_client(store)
     item = client.post(
         "/v1/items",
@@ -242,16 +241,72 @@ def test_edit_without_changes_is_approve_and_choose_only_confirms_fields(store):
         },
     ).json()
     url = f"/v1/items/{item['id']}/review"
+    detail = f"/v1/items/{item['id']}"
+    # edit without changes -> approve
     assert client.post(url, json={"action": "edit", "fields": {}}).json()["status"] == "approved"
-    changed = client.post(
-        url, json={"action": "choose", "choice": "unsure", "fields": {"family": None}}
+    # approve with changes -> edit
+    approved = client.post(url, json={"action": "approve", "fields": {"bpm": 50}})
+    assert approved.json()["status"] == "corrected"
+    assert client.get(detail).json()["reviews"][-1]["action"] == "edit"
+    # unsure + corrections: both kept, status follows the fields
+    unsure = client.post(
+        url,
+        json={
+            "action": "choose",
+            "choice": "unsure",
+            "fields": {"family": "keys", "leaf": "piano"},
+        },
     )
-    assert changed.status_code == 422  # a choice cannot carry corrections
-    chosen = client.post(url, json={"action": "choose", "choice": "unsure", "fields": {}})
-    assert chosen.status_code == 200
-    review = client.get(f"/v1/items/{item['id']}").json()["reviews"][-1]
-    assert review["choice"] == "unsure"
-    assert review["field_diff"] == {} and review["fields"]["family"] == "drums"
+    assert unsure.status_code == 200 and unsure.json()["status"] == "corrected"
+    review = client.get(detail).json()["reviews"][-1]
+    assert review["action"] == "edit" and review["choice"] == "unsure"
+    assert review["field_diff"]["family"] == {"from": "drums", "to": "keys"}
+    assert review["corrected_output"]["leaf"] == "piano"
+    # the flag also works on approve/edit, and with no changes
+    flagged = client.post(url, json={"action": "approve", "choice": "unsure", "fields": {}})
+    assert flagged.json()["status"] == "approved"
+    review = client.get(detail).json()["reviews"][-1]
+    assert review["choice"] == "unsure" and review["field_diff"] == {}
+    bad = client.post(url, json={"action": "edit", "choice": "maybe", "fields": {"bpm": 60}})
+    assert bad.status_code == 422
+
+    [record] = export_items(store, "p")
+    assert record["choice"] == "unsure" and record["status"] == "approved"
+    assert record["corrected_output"] == OUTPUT  # never the choice string
+
+
+def test_exports_keep_flag_and_fields_together(store, tmp_path):
+    client = make_client(store)
+    item = client.post(
+        "/v1/items",
+        json={
+            "project": "p",
+            "input": "a",
+            "output": OUTPUT,
+            "fields": SCHEMA,
+            "options": ["unsure"],
+            "external_id": "f-9",
+        },
+    ).json()
+    client.post(
+        f"/v1/items/{item['id']}/review",
+        json={"action": "choose", "choice": "unsure", "fields": {"bpm": 50}},
+    )
+    [jsonl] = export_items(store, "p")
+    assert jsonl["choice"] == "unsure"
+    assert jsonl["field_diff"] == {"bpm": {"from": 100, "to": 50}}
+    assert jsonl["corrected_output"]["bpm"] == 50
+    [evalset] = export_items(store, "p", fmt="eval-set")
+    assert evalset["expected"]["bpm"] == 50
+    assert evalset["metadata"]["choice"] == "unsure"
+    assert evalset["metadata"]["fields"]["bpm"] == 50
+    [ft] = export_items(store, "p", fmt="openai-ft")
+    assert json.loads(ft["messages"][1]["content"])["bpm"] == 50
+    assert ft["metadata"]["choice"] == "unsure"
+    path = tmp_path / "flag.parquet"
+    assert export_hf(store, "p", path) == 1
+    row = pq.read_table(path).to_pylist()[0]
+    assert row["choice"] == "unsure" and row["external_id"] == "f-9"
 
 
 def test_fields_rejected_without_schema_and_legacy_edit_unchanged(store):
