@@ -199,3 +199,98 @@ optional starting offset in seconds for both audio and video. Blob URLs serve
 the detected audio content type and support HTTP Range requests.
 HF Parquet exports include ordered audio bytes in an `audio` list alongside
 the existing `images` list; `--no-images` omits both lists' media bytes.
+
+## Structured label correction (v0.2)
+
+Declare a field schema and reviewers get a correction form instead of raw JSON:
+each field is prefilled from the output, one action confirms everything, and only
+the fields they change are highlighted and saved as a diff.
+
+```python
+import hil_eval as hil
+
+FIELDS = [
+    {"name": "family", "choices": ["drums", "keys", "bass", "synth"]},
+    {"name": "leaf", "label": "Instrument", "depends_on": "family",
+     "choices": {"drums": ["kick", "snare", "top"], "keys": ["piano", "rhodes"]}},
+    {"name": "type", "choices": ["loop", "one_shot"]},
+    {"name": "bpm", "kind": "number", "min": 40, "max": 240, "integer": True,
+     "multipliers": [0.5, 2]},
+    {"name": "key", "kind": "text", "path": "meta.key"},  # dotted path into output
+]
+hil.init("soundai-labels", fields=FIELDS)          # project-wide schema
+hil.submit(input, output, fields=FIELDS)          # or per item
+@hil.review(judge=..., fields=FIELDS)              # or per decorated function
+```
+
+Field kinds are `enum` (`choices`, optional `depends_on` hierarchy,
+`allow_custom`), `number` (`min`, `max`, `step`, `integer`, `multipliers`) and
+`text` (`suggestions`); all accept `label`, `path` and `nullable` (default true).
+`hil-eval fields --project P --set schema.json` (or `PUT /v1/projects/P/fields`)
+stores a project schema; item-level schemas win.
+
+In the UI, enum values are chips (with a filter box for long lists), children of
+a changed parent are cleared or snapped to the new branch, numbers have steppers
+and ×0.5/×2 buttons, and every changed row shows the proposed value struck through
+with a per-field reset. Keys: `1`–`9` jump to a field, arrows move between chips,
+typing filters and `Enter` picks, `u` resets, `Enter` confirms all / saves the
+corrections. The layout works on a phone (large chips, sticky save bar).
+
+Reviews submitted with `fields` store `Review.fields` (the full corrected dict)
+and `Review.field_diff` (`{"bpm": {"from": 100, "to": 50}}`), merge the values into
+`corrected_output`, and become `approved` when nothing changed or `corrected`
+otherwise. Only changed values are validated, so an out-of-schema proposal can
+still be confirmed. Every export format carries `external_id`, `fields` and
+`field_diff`, so building an overrides table is a one-liner:
+
+```python
+overrides = {r["external_id"]: {k: v["to"] for k, v in r["field_diff"].items()}
+             for r in hil.export(statuses=["corrected"]) if r["field_diff"]}
+```
+
+![Label correction on an iPhone](docs/screenshots/label-review-iphone.png)
+
+## Path-reference assets (v0.2)
+
+For media that must not be copied (large or licensed libraries), record the path
+only. Nothing is read, hashed or copied at enqueue time, so items can be created
+on a machine that does not have the files:
+
+```python
+hil.submit({"audio": "/Volumes/Extreme SSD/Splice/kick.wav"}, output,
+           path_assets="input.audio")             # also on @hil.review(path_assets=...)
+```
+
+The machine that has the files serves them, but only from directories you allow
+(default: none):
+
+```bash
+hil-eval serve --asset-root "/Volumes/Extreme SSD"   # repeatable
+HIL_ASSET_ROOTS="/Volumes/Extreme SSD:/data/audio" hil-eval serve
+```
+
+`GET /v1/items/{id}/assets/{index}` streams the file with HTTP Range support.
+Paths outside every root, including `..` traversal and symlinks that resolve
+outside a root, are refused (403); allowed but absent files return 404 and the UI
+shows "File not found on this machine" with the recorded path. Item responses
+report each asset's `kind` (`blob`/`path`), `source_path` and `availability`.
+Exports keep path assets as references (`{"$asset_path": ..., "kind": "path",
+"path": ...}`); `hf` and `openai-ft` never read them. Over HTTP use
+`asset_paths: [{"path": "/abs/file.wav"}]` in `POST /v1/items`.
+
+## Bulk import
+
+```bash
+hil-eval --db .hil/labels.db import review_subset.jsonl \
+  --project soundai-labels --id-field file_id \
+  --path-assets input.audio --fields schema.json
+# imported 386, skipped 0 duplicate(s), failed 0 (of 386 records)
+```
+
+Each line is a `hil.submit`-style object (`input`, `output`, optional `project`,
+`name`, `confidence`, `judge_label`, `judge_reason`, `tags`, `trace_id`, `options`,
+`assets`, `images`, `path_assets`, `fields`, `external_id`). Re-running is safe:
+records whose `external_id` (or `--id-field` value) already exists in the project,
+or whose exact content was imported before, are skipped. Unknown keys are
+reported and ignored; bad lines are reported with their line number and make the
+command exit 1 after importing the rest. `--dry-run` validates without writing.
