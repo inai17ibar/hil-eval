@@ -438,3 +438,222 @@ del {
   background: #ffd4d4;
   color: #601919;
 }
+/* Structured label correction (v0.2) */
+.labels-section h2 .muted {
+  font-weight: 500;
+  font-size: 14px;
+}
+.label-form {
+  display: grid;
+  gap: 10px;
+}
+.label-row {
+  border: 1px solid #dce2e9;
+  border-left: 4px solid #dce2e9;
+  border-radius: 9px;
+  background: #fff;
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+  scroll-margin: 80px;
+}
+.label-row.changed {
+  border-color: #f0c36d;
+  border-left-color: #e09b14;
+  background: #fff8e8;
+}
+.label-row.invalid {
+  border-color: #e3a1a1;
+  border-left-color: #c43c3c;
+  background: #fff3f3;
+}
+.label-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.label-name {
+  font-weight: 650;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.label-name .hotkey {
+  font-size: 11px;
+  min-width: 20px;
+  text-align: center;
+}
+.label-same {
+  color: #6b7a8c;
+  font-size: 13px;
+}
+.label-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+}
+.label-change del {
+  color: #9a4b4b;
+}
+.label-change ins {
+  color: #1d6b35;
+  text-decoration: none;
+  font-weight: 650;
+}
+.label-change .reset {
+  padding: 2px 9px;
+  margin-left: 6px;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+.chip {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  border-radius: 999px;
+  padding: 6px 13px;
+  min-height: 38px;
+  font-size: 15px;
+  background: #f4f7fb;
+}
+.chip.proposed {
+  border-style: dashed;
+  border-color: #8a9bb0;
+}
+.chip.selected {
+  background: #14283e;
+  border-color: #14283e;
+  color: #fff;
+  font-weight: 650;
+}
+.label-row.changed .chip.selected {
+  background: #b36f00;
+  border-color: #b36f00;
+}
+.chip.outside:not(.selected) {
+  color: #8a5a00;
+  background: #fff3d6;
+}
+.chip.custom {
+  border-style: dashed;
+}
+.chip-filter,
+.number-input input,
+.text-input input {
+  width: 100%;
+  font-size: 16px; /* >= 16px keeps iOS Safari from zooming on focus */
+  padding: 8px 10px;
+  border: 1px solid #cdd5df;
+  border-radius: 7px;
+}
+.enum-input {
+  display: grid;
+  gap: 6px;
+}
+.number-input {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.number-input input {
+  width: 110px;
+  text-align: center;
+}
+.number-input > button:not(.chip) {
+  min-width: 40px;
+  min-height: 38px;
+  font-size: 18px;
+  padding: 4px 10px;
+}
+.field-error {
+  margin: 0;
+  color: #b42323;
+  font-size: 13px;
+}
+.label-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 0;
+  background: linear-gradient(rgba(245, 247, 250, 0.85), #f5f7fa 30%);
+}
+.label-summary {
+  flex: 1;
+  color: #4b5a6c;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.label-actions .save {
+  background: #b36f00;
+  border-color: #b36f00;
+}
+.asset-missing {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px dashed #d9a441;
+  border-radius: 8px;
+  background: #fffaf0;
+  font-size: 14px;
+}
+.asset-missing code {
+  word-break: break-all;
+  font-size: 12px;
+}
+.output-details {
+  margin: 16px 0;
+}
+.output-details summary {
+  cursor: pointer;
+  color: #4b5a6c;
+}
+.past-diff {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+.past-diff ins {
+  text-decoration: none;
+  color: #1d6b35;
+}
+@media (max-width: 760px) {
+  .label-row {
+    padding: 10px;
+  }
+  .label-name .hotkey {
+    display: none;
+  }
+  .chip {
+    min-height: 42px;
+    padding: 8px 14px;
+  }
+  .label-actions {
+    margin: 12px -18px 0;
+    padding: 10px 18px calc(10px + env(safe-area-inset-bottom));
+    background: #fff;
+    border-top: 1px solid #dce2e9;
+    box-shadow: 0 -4px 12px rgba(20, 40, 62, 0.08);
+  }
+  .label-actions kbd,
+  .label-summary,
+  footer {
+    display: none;
+  }
+  .label-actions .primary {
+    flex: 1 0 auto;
+    min-height: 46px;
+  }
+}

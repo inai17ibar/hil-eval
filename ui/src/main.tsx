@@ -21,6 +21,8 @@ import "./style.css";
 import { JsonForm } from "./JsonForm";
 import { AssetPreview } from "./AssetPreview";
 import { Diff } from "./Diff";
+import { LabelForm, focusField } from "./LabelForm";
+import { changedFields, fieldErrors, type Values } from "./labelFields";
 import type { Asset, ReasonCode } from "./api";
 const AssetsContext = createContext<Asset[]>([]);
 function InlineAsset({ sha, alt }: { sha: string; alt: string }) {
@@ -29,6 +31,17 @@ function InlineAsset({ sha, alt }: { sha: string; alt: string }) {
   if (asset) return <AssetPreview asset={asset} />;
   return <img className="asset" src={imageUrl(sha)} alt={alt} loading="lazy" />;
 }
+function InlinePathAsset({ path }: { path: string }) {
+  const assets = useContext(AssetsContext);
+  const asset = assets.find((a) => a.kind === "path" && a.source_path === path);
+  if (asset) return <AssetPreview asset={asset} />;
+  return <code>{path}</code>;
+}
+const isAssetMarker = (v: Json): boolean =>
+  !!v &&
+  typeof v === "object" &&
+  !Array.isArray(v) &&
+  (typeof v.$asset === "string" || typeof v.$asset_path === "string");
 const pretty = (value: Json) => JSON.stringify(value, null, 2);
 const confidence = (value: number | null) =>
   value === null ? "—" : `${(value * 100).toFixed(1)}%`;
@@ -36,10 +49,12 @@ function Value({ value }: { value: Json }) {
   if (value && typeof value === "object") {
     if (!Array.isArray(value) && typeof value.$asset === "string")
       return <InlineAsset sha={value.$asset} alt={`Asset ${value.$asset}`} />;
+    if (!Array.isArray(value) && typeof value.$asset_path === "string")
+      return <InlinePathAsset path={value.$asset_path} />;
     const hasAsset = (v: Json): boolean =>
       !!v &&
       typeof v === "object" &&
-      ("$asset" in v || Object.values(v).some(hasAsset));
+      (isAssetMarker(v) || Object.values(v).some(hasAsset));
     if (hasAsset(value))
       return (
         <div className="structured">
@@ -88,6 +103,12 @@ function App() {
   const [reasonText, setReasonText] = useState("");
   const [judge, setJudge] = useState("");
   const [note, setNote] = useState("");
+  const [labels, setLabels] = useState<Values>({});
+  const fields = item?.fields?.length ? item.fields : null;
+  const proposed: Values = item?.proposed_fields ?? {};
+  const changed = fields ? changedFields(proposed, labels) : [];
+  const labelErrors = fields ? fieldErrors(fields, proposed, labels) : {};
+  const labelsInvalid = Object.keys(labelErrors).length > 0;
   const invalid =
     [filters.min, filters.max].some(
       (v) =>
@@ -151,7 +172,10 @@ function App() {
     setDetailLoading(true);
     api
       .item(selected, c.signal)
-      .then(setItem)
+      .then((loaded) => {
+        setLabels(loaded.proposed_fields ?? {});
+        setItem(loaded);
+      })
       .catch((e) => {
         if (!c.signal.aborted) setError(String(e));
       })
@@ -205,6 +229,16 @@ function App() {
   async function submit(action: Action, choice?: Json) {
     if (!item || item.status === "superseded" || busy || loading || invalid)
       return;
+    // With a field schema, approve/choose carry the label form; any change turns
+    // "approve" into a structured correction ("edit" with fields).
+    const withFields =
+      !!fields && !editing && action !== "reject" && action !== "skip";
+    if (withFields && labelsInvalid) {
+      setError("Fix the highlighted label fields first.");
+      focusField(fields!.findIndex((f) => labelErrors[f.name]) + 1);
+      return;
+    }
+    if (withFields && action === "approve" && changed.length) action = "edit";
     let corrected: Json = draft;
     if (
       action === "edit" &&
@@ -229,7 +263,10 @@ function App() {
         reason_text: reasonText,
         judge_correct: judge === "" ? null : judge === "yes",
         ...(note ? { note } : {}),
-        ...(action === "edit" ? { corrected_output: corrected } : {}),
+        ...(withFields ? { fields: labels } : {}),
+        ...(action === "edit" && !withFields
+          ? { corrected_output: corrected }
+          : {}),
       });
       const index = queue.items.findIndex((i) => i.id === item.id);
       setSelected(
@@ -260,6 +297,16 @@ function App() {
         return;
       }
       if (
+        (event.ctrlKey || event.metaKey) &&
+        event.key === "Enter" &&
+        fields &&
+        !busy
+      ) {
+        event.preventDefault();
+        void submit("approve");
+        return;
+      }
+      if (
         event.target instanceof HTMLElement &&
         event.target.closest(
           'input, textarea, select, [contenteditable="true"]',
@@ -275,7 +322,18 @@ function App() {
         event.repeat
       )
         return;
+      if (fields && event.key === "Enter") {
+        if (event.target instanceof HTMLButtonElement) return; // activates the chip/button
+        event.preventDefault();
+        void submit("approve");
+        return;
+      }
+      if (fields && /^[1-9]$/.test(event.key)) {
+        if (focusField(Number(event.key))) event.preventDefault();
+        return;
+      }
       const actions: Record<string, () => void> = {
+        u: () => fields && setLabels(proposed),
         j: () => move(1),
         k: () => move(-1),
         a: () => void submit("approve"),
@@ -463,12 +521,7 @@ function App() {
                   </span>
                 ))}
               </div>
-              <section>
-                <h2>Input</h2>
-                <AssetsContext.Provider value={item.assets}>
-                  <Value value={item.input} />
-                </AssetsContext.Provider>
-              </section>
+              {!fields && inputSection(item)}
               {item.assets.length > 0 && (
                 <section>
                   <h2>Assets</h2>
@@ -477,6 +530,7 @@ function App() {
                       <figure key={`${asset.sha256}-${index}`}>
                         <AssetPreview asset={asset} />
                         <figcaption>
+                          {asset.filename ? `${asset.filename} · ` : ""}
                           {asset.role} · {asset.mime}
                         </figcaption>
                       </figure>
@@ -484,13 +538,72 @@ function App() {
                   </div>
                 </section>
               )}
-              <section>
-                <h2>Output</h2>
-                <pre>{pretty(item.output)}</pre>
-                <AssetsContext.Provider value={item.assets}>
-                  <ValueImages value={item.output} />
-                </AssetsContext.Provider>
-              </section>
+              {fields && (
+                <section className="labels-section">
+                  <h2>
+                    Labels{" "}
+                    <span className="muted">
+                      {changed.length
+                        ? `${changed.length} changed`
+                        : "all as proposed"}
+                    </span>
+                  </h2>
+                  <ReviewControls
+                    status={item.status}
+                    disabled={busy || loading || invalid || editing}
+                  >
+                    <LabelForm
+                      fields={fields}
+                      proposed={proposed}
+                      values={labels}
+                      onChange={setLabels}
+                    />
+                    <div className="label-actions">
+                      <span className="label-summary" aria-live="polite">
+                        {changed.length
+                          ? `Changed: ${changed.join(", ")}`
+                          : "No changes"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setLabels(proposed)}
+                        disabled={!changed.length}
+                      >
+                        Reset <kbd>u</kbd>
+                      </button>
+                      <button
+                        type="button"
+                        className={changed.length ? "primary save" : "primary"}
+                        disabled={labelsInvalid}
+                        onClick={() => void submit("approve")}
+                      >
+                        {changed.length
+                          ? `Save ${changed.length} correction${changed.length > 1 ? "s" : ""}`
+                          : "✓ Confirm all"}{" "}
+                        <kbd>Enter</kbd>
+                      </button>
+                    </div>
+                  </ReviewControls>
+                </section>
+              )}
+              {fields && inputSection(item)}
+              {fields ? (
+                <details className="output-details">
+                  <summary>Raw output</summary>
+                  <pre>{pretty(item.output)}</pre>
+                  <AssetsContext.Provider value={item.assets}>
+                    <ValueImages value={item.output} />
+                  </AssetsContext.Provider>
+                </details>
+              ) : (
+                <section>
+                  <h2>Output</h2>
+                  <pre>{pretty(item.output)}</pre>
+                  <AssetsContext.Provider value={item.assets}>
+                    <ValueImages value={item.output} />
+                  </AssetsContext.Provider>
+                </section>
+              )}
               <section className="review">
                 <h2>Your review</h2>
                 <ReviewControls
@@ -654,7 +767,20 @@ function App() {
                       )}
                       {review.reason_text && <p>{review.reason_text}</p>}
                       {review.note && <p className="reason">{review.note}</p>}
-                      {review.action === "edit" && (
+                      {review.field_diff &&
+                        Object.keys(review.field_diff).length > 0 && (
+                          <ul className="past-diff">
+                            {Object.entries(review.field_diff).map(
+                              ([name, change]) => (
+                                <li key={name}>
+                                  {name}: <del>{pretty(change.from)}</del> →{" "}
+                                  <ins>{pretty(change.to)}</ins>
+                                </li>
+                              ),
+                            )}
+                          </ul>
+                        )}
+                      {review.action === "edit" && !review.field_diff && (
                         <pre>{pretty(review.corrected_output)}</pre>
                       )}
                     </div>
@@ -677,6 +803,10 @@ function App() {
           <kbd>a</kbd> approve
         </span>
         <span>
+          <kbd>1–9</kbd> label field · <kbd>Enter</kbd> confirm / save labels ·{" "}
+          <kbd>u</kbd> reset labels
+        </span>
+        <span>
           <kbd>e</kbd> edit
         </span>
         <span>
@@ -695,10 +825,22 @@ function App() {
     </>
   );
 }
+function inputSection(item: Item) {
+  return (
+    <section>
+      <h2>Input</h2>
+      <AssetsContext.Provider value={item.assets}>
+        <Value value={item.input} />
+      </AssetsContext.Provider>
+    </section>
+  );
+}
 function ValueImages({ value }: { value: Json }) {
   if (!value || typeof value !== "object") return null;
   if (!Array.isArray(value) && typeof value.$asset === "string")
     return <InlineAsset sha={value.$asset} alt="Output asset" />;
+  if (!Array.isArray(value) && typeof value.$asset_path === "string")
+    return <InlinePathAsset path={value.$asset_path} />;
   return (
     <>
       {Object.entries(value).map(([key, child]) => (

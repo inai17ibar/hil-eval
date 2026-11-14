@@ -95,3 +95,127 @@ test("seed audio has a playable WAV source", async ({ page, request }) => {
     .poll(() => audio.evaluate((el) => (el as HTMLAudioElement).currentTime))
     .toBeGreaterThanOrEqual(0.25);
 });
+
+const LABEL_FIELDS = [
+  { name: "family", kind: "enum", choices: ["drums", "keys", "bass"] },
+  {
+    name: "leaf",
+    kind: "enum",
+    depends_on: "family",
+    choices: {
+      drums: ["kick", "snare"],
+      keys: ["piano", "rhodes"],
+      bass: ["808"],
+    },
+  },
+  { name: "type", kind: "enum", choices: ["loop", "one_shot"] },
+  {
+    name: "bpm",
+    kind: "number",
+    min: 40,
+    max: 240,
+    integer: true,
+    multipliers: [0.5, 2],
+  },
+  { name: "key", kind: "text" },
+];
+const labelItem = (request: APIRequestContext) =>
+  seed(request, {
+    project: "labels-e2e",
+    output: {
+      family: "drums",
+      leaf: "kick",
+      type: "loop",
+      bpm: 100,
+      key: null,
+    },
+    fields: LABEL_FIELDS,
+  });
+const latestReview = async (request: APIRequestContext, id: string) =>
+  (await (await request.get(`/v1/items/${id}`)).json()).reviews.at(-1);
+
+test("confirm all labels as proposed with Enter", async ({ page, request }) => {
+  const item = await labelItem(request);
+  await page.goto(`/items/${item.id}`);
+  await expect(page.getByText("No changes")).toBeVisible();
+  await page.locator("h1").first().click();
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() => latestReview(request, item.id))
+    .toMatchObject({
+      action: "approve",
+      field_diff: {},
+      fields: {
+        family: "drums",
+        leaf: "kick",
+        type: "loop",
+        bpm: 100,
+        key: null,
+      },
+    });
+});
+
+test("correct only the wrong fields with chips and keyboard", async ({
+  page,
+  request,
+}) => {
+  const item = await labelItem(request);
+  await page.goto(`/items/${item.id}`);
+  const family = page.getByRole("radiogroup", { name: "family" });
+  await family.getByRole("radio", { name: "keys" }).click();
+  // the hierarchical child no longer fits: it is cleared and highlighted
+  await expect(page.locator(".label-row.changed")).toHaveCount(2);
+  await expect(page.getByRole("radio", { name: "kick" })).toHaveCount(0);
+  await page.getByRole("radio", { name: "rhodes" }).click();
+  await page.locator("h1").first().click();
+  await page.keyboard.press("4"); // jump to bpm
+  await expect(page.getByRole("textbox", { name: "bpm" })).toBeFocused();
+  await page.getByRole("button", { name: "×0.5" }).click();
+  await expect(page.locator(".label-row.changed")).toHaveCount(3);
+  await expect(
+    page.getByRole("button", { name: /Save 3 corrections/ }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Reset family" }).click();
+  await expect(page.locator(".label-row.changed")).toHaveCount(2);
+  await family.getByRole("radio", { name: "keys" }).click();
+  await page.getByRole("radio", { name: "rhodes" }).click();
+  await page.getByRole("button", { name: /Save 3 corrections/ }).click();
+  await expect
+    .poll(() => latestReview(request, item.id))
+    .toMatchObject({
+      action: "edit",
+      field_diff: {
+        family: { from: "drums", to: "keys" },
+        leaf: { from: "kick", to: "rhodes" },
+        bpm: { from: 100, to: 50 },
+      },
+    });
+  const saved = await (await request.get(`/v1/items/${item.id}`)).json();
+  expect(saved.status).toBe("corrected");
+});
+
+test("invalid label values block saving", async ({ page, request }) => {
+  const item = await labelItem(request);
+  await page.goto(`/items/${item.id}`);
+  await page.getByRole("textbox", { name: "bpm" }).fill("999");
+  await expect(
+    page.getByRole("alert").filter({ hasText: "≤ 240" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Save 1 correction/ }),
+  ).toBeDisabled();
+});
+
+test("path assets stream from the asset root or explain why not", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/items/seed-paths");
+  const audio = page.locator("article audio").first();
+  await expect(audio).toBeVisible();
+  const src = await audio.getAttribute("src");
+  expect(src).toBe("/v1/items/seed-paths/assets/0");
+  const partial = await request.get(src!, { headers: { Range: "bytes=0-3" } });
+  expect(partial.status()).toBe(206);
+  await expect(page.getByText("File not found on this machine")).toBeVisible();
+});

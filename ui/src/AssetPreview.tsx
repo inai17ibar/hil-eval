@@ -1,11 +1,37 @@
 import { useState } from "react";
-import { imageUrl, type Asset } from "./api";
+import { assetUrl, type Asset } from "./api";
+
+export const UNAVAILABLE: Record<string, string> = {
+  missing: "File not found on this machine",
+  not_allowed:
+    "Not served: this path is outside the server's --asset-root directories",
+};
+
+function Unavailable({ asset, reason }: { asset: Asset; reason: string }) {
+  return (
+    <div className="asset-missing" role="note">
+      <strong>{UNAVAILABLE[reason] ?? "Asset unavailable"}</strong>
+      {asset.source_path && <code>{asset.source_path}</code>}
+      {reason === "not_allowed" && (
+        <span className="muted">
+          Start the server on the machine that has the file with{" "}
+          <code>hil-eval serve --asset-root DIR</code>.
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function AssetPreview({ asset }: { asset: Asset }) {
   const [size, setSize] = useState({
     width: asset.width ?? 0,
     height: asset.height ?? 0,
   });
+  const [failed, setFailed] = useState(false);
+  if (asset.availability && asset.availability !== "available")
+    return <Unavailable asset={asset} reason={asset.availability} />;
+  if (failed && asset.kind === "path")
+    return <Unavailable asset={asset} reason="missing" />;
   if (asset.mime.startsWith("audio/") || asset.mime.startsWith("video/")) {
     const Media = asset.mime.startsWith("audio/") ? "audio" : "video";
     return (
@@ -13,7 +39,8 @@ export function AssetPreview({ asset }: { asset: Asset }) {
         className="asset"
         controls
         preload="metadata"
-        src={imageUrl(asset.sha256)}
+        src={assetUrl(asset)}
+        onError={() => setFailed(true)}
         onLoadedMetadata={(e) => {
           if (asset.video_ts !== null)
             e.currentTarget.currentTime = Math.min(
@@ -28,7 +55,7 @@ export function AssetPreview({ asset }: { asset: Asset }) {
     <div className="image-frame">
       <img
         className="asset"
-        src={imageUrl(asset.sha256)}
+        src={assetUrl(asset)}
         alt={`${asset.role} asset`}
         loading="lazy"
         onLoad={(e) =>

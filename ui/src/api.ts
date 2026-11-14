@@ -3,6 +3,10 @@ export type Json =
 export type Status =
   "pending" | "approved" | "corrected" | "rejected" | "skipped" | "superseded";
 export type Action = "approve" | "edit" | "reject" | "skip" | "choose";
+export interface FieldChange {
+  from: Json;
+  to: Json;
+}
 export interface Review {
   id: string;
   item_id: string;
@@ -15,9 +19,27 @@ export interface Review {
   judge_correct: boolean | null;
   note: string | null;
   created_at: string;
+  fields: Record<string, Json> | null;
+  field_diff: Record<string, FieldChange> | null;
+}
+export interface FieldDefinition {
+  name: string;
+  kind: "enum" | "number" | "text";
+  label?: string | null;
+  path?: string | null;
+  choices?: string[] | Record<string, string[]> | null;
+  depends_on?: string | null;
+  allow_custom?: boolean;
+  nullable?: boolean;
+  min?: number | null;
+  max?: number | null;
+  step?: number | null;
+  integer?: boolean;
+  multipliers?: number[] | null;
+  suggestions?: string[] | null;
 }
 export interface Asset {
-  sha256: string;
+  sha256: string | null;
   role: "input" | "output" | "context";
   mime: string;
   width: number | null;
@@ -26,6 +48,10 @@ export interface Asset {
   order: number;
   video_ts: number | null;
   bbox: [number, number, number, number] | null;
+  kind: "blob" | "path";
+  source_path: string | null;
+  filename: string | null;
+  availability: "available" | "missing" | "not_allowed";
 }
 export interface Item {
   id: string;
@@ -45,6 +71,9 @@ export interface Item {
   assets: Asset[];
   options: Json[] | null;
   expires_at: string | null;
+  fields: FieldDefinition[] | null;
+  proposed_fields: Record<string, Json> | null;
+  external_id: string | null;
   reviews?: Review[];
 }
 export interface ItemDetail extends Item {
@@ -55,6 +84,7 @@ export interface Project {
   threshold: number | null;
   target_miss_rate: number;
   audit_rate: number;
+  fields: FieldDefinition[] | null;
 }
 export interface Queue {
   items: Item[];
@@ -72,6 +102,7 @@ export interface ReviewBody {
   reason_codes?: string[];
   reason_text?: string;
   corrected_output?: Json;
+  fields?: Record<string, Json>;
   judge_correct: boolean | null;
   note?: string;
 }
@@ -137,6 +168,17 @@ export const api = {
       body: JSON.stringify(body),
     }),
 };
+function withKey(url: string): string {
+  return apiKey
+    ? `${url}${url.includes("?") ? "&" : "?"}api_key=${encodeURIComponent(apiKey)}`
+    : url;
+}
+/** Playable URL for any asset; path references stream from the serving machine. */
+export function assetUrl(asset: Asset): string {
+  return asset.kind === "path" || !asset.sha256
+    ? withKey(asset.url)
+    : imageUrl(asset.sha256);
+}
 export function imageUrl(sha: string): string {
   return `/v1/blobs/${encodeURIComponent(sha)}${apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : ""}`;
 }

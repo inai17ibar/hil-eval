@@ -143,7 +143,11 @@ describe("review regression controls", () => {
   });
 });
 
-vi.mock("./api", () => ({ imageUrl: (sha: string) => `/v1/blobs/${sha}` }));
+vi.mock("./api", () => ({
+  imageUrl: (sha: string) => `/v1/blobs/${sha}`,
+  assetUrl: (asset: { kind: string; url: string; sha256: string | null }) =>
+    asset.kind === "path" ? asset.url : `/v1/blobs/${asset.sha256}`,
+}));
 
 describe("audio assets", () => {
   it("renders a playable audio control with metadata preload", () => {
@@ -159,6 +163,10 @@ describe("audio assets", () => {
           width: null,
           height: null,
           url: "/v1/blobs/audio-hash",
+          kind: "blob",
+          source_path: null,
+          filename: null,
+          availability: "available",
         }}
       />,
     );
@@ -166,5 +174,43 @@ describe("audio assets", () => {
     expect(html).toContain('controls=""');
     expect(html).toContain('preload="metadata"');
     expect(html).toContain('src="/v1/blobs/audio-hash"');
+  });
+});
+
+const pathAsset = (availability: "available" | "missing" | "not_allowed") => ({
+  sha256: null,
+  mime: "audio/wav",
+  role: "input" as const,
+  order: 0,
+  video_ts: null,
+  bbox: null,
+  width: null,
+  height: null,
+  url: "/v1/items/i1/assets/0",
+  kind: "path" as const,
+  source_path: "/Volumes/Extreme SSD/Splice/kick.wav",
+  filename: "kick.wav",
+  availability,
+});
+
+describe("path-reference assets", () => {
+  it("streams available paths from the item asset endpoint", () => {
+    const html = renderToStaticMarkup(
+      <AssetPreview asset={pathAsset("available")} />,
+    );
+    expect(html).toContain("<audio");
+    expect(html).toContain('src="/v1/items/i1/assets/0"');
+  });
+  it("explains missing and disallowed files instead of a broken player", () => {
+    const missing = renderToStaticMarkup(
+      <AssetPreview asset={pathAsset("missing")} />,
+    );
+    expect(missing).toContain("File not found on this machine");
+    expect(missing).toContain("/Volumes/Extreme SSD/Splice/kick.wav");
+    expect(missing).not.toContain("<audio");
+    const denied = renderToStaticMarkup(
+      <AssetPreview asset={pathAsset("not_allowed")} />,
+    );
+    expect(denied).toContain("--asset-root");
   });
 });
