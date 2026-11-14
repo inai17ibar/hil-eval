@@ -14,8 +14,10 @@ dotted `path`. A review may carry `fields`; the server (not the client) computes
 `Review.fields` (all values) and `Review.field_diff` (changed only), validates
 only changed values (plus children of a changed parent) so that out-of-schema
 proposals can be confirmed, and writes the values into `corrected_output`.
-`edit` without changes is stored as `approve`; `approve` with changes is
-rejected. No new `ReviewAction` was added, so status mapping, tuning and old
+`edit` without changes is stored as `approve`; `approve` or `choose` with
+changes is rejected (a choice only confirms the proposed fields, so exports never
+disagree with the stored values); fields always win over an explicitly supplied
+`corrected_output`, and outputs that cannot hold the values (non-objects) get 422. No new `ReviewAction` was added, so status mapping, tuning and old
 clients are unchanged. Store protocol gains `set_project_fields`.
 
 Path-reference assets are `AssetRef(kind="path", sha256=None, path=<abs path>)`

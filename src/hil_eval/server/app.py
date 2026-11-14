@@ -651,8 +651,10 @@ def create_app(
                 corrected_fields, diff = check_values(schema, item.output, body.fields)
             except FieldError as exc:
                 raise HTTPException(422, str(exc)) from exc
-            if action == ReviewAction.approve and diff:
-                raise HTTPException(422, "approve cannot change fields; use action 'edit'")
+            if action in (ReviewAction.approve, ReviewAction.choose) and diff:
+                raise HTTPException(
+                    422, f"{action.value} cannot change fields; use action 'edit' to correct"
+                )
             if action == ReviewAction.edit and not diff and corrected_output is None:
                 action = ReviewAction.approve  # nothing changed: record a confirmation
             elif action == ReviewAction.edit:

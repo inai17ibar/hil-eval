@@ -249,7 +249,8 @@ corrections. The layout works on a phone (large chips, sticky save bar).
 Reviews submitted with `fields` store `Review.fields` (the full corrected dict)
 and `Review.field_diff` (`{"bpm": {"from": 100, "to": 50}}`), merge the values into
 `corrected_output`, and become `approved` when nothing changed or `corrected`
-otherwise. Only changed values are validated, so an out-of-schema proposal can
+otherwise. `choose` can only confirm fields as proposed (the UI disables choices
+while labels are edited); the output must be an object for corrections. Only changed values are validated, so an out-of-schema proposal can
 still be confirmed. Every export format carries `external_id`, `fields` and
 `field_diff`, so building an overrides table is a one-liner:
 

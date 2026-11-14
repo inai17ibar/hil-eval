@@ -219,3 +219,40 @@ test("path assets stream from the asset root or explain why not", async ({
   expect(partial.status()).toBe(206);
   await expect(page.getByText("File not found on this machine")).toBeVisible();
 });
+
+test("choices confirm labels as proposed and wait while labels are edited", async ({
+  page,
+  request,
+}) => {
+  const item = await seed(request, {
+    project: "labels-e2e",
+    output: {
+      family: "drums",
+      leaf: "kick",
+      type: "loop",
+      bpm: 100,
+      key: null,
+    },
+    fields: LABEL_FIELDS,
+    options: ["correct", "unsure"],
+  });
+  await page.goto(`/items/${item.id}`);
+  await page
+    .getByRole("radiogroup", { name: "type" })
+    .getByRole("radio", { name: "one_shot" })
+    .click();
+  await expect(
+    page.getByRole("button", { name: 'Choose "unsure"' }),
+  ).toBeDisabled();
+  await page.keyboard.press("u");
+  await page.locator("h1").first().click();
+  await page.keyboard.press("u");
+  await page.getByRole("button", { name: 'Choose "unsure"' }).click();
+  await expect
+    .poll(() => latestReview(request, item.id))
+    .toMatchObject({
+      action: "choose",
+      choice: "unsure",
+      field_diff: {},
+    });
+});

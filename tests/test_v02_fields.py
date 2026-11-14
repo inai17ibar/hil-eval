@@ -223,7 +223,7 @@ def test_api_review_with_fields_end_to_end(store):
     assert ft["metadata"]["field_diff"]["key"]["to"] == "C major"
 
 
-def test_edit_without_changes_is_recorded_as_approve_and_choose_keeps_fields(store):
+def test_edit_without_changes_is_approve_and_choose_only_confirms_fields(store):
     client = make_client(store)
     item = client.post(
         "/v1/items",
@@ -237,13 +237,15 @@ def test_edit_without_changes_is_recorded_as_approve_and_choose_keeps_fields(sto
     ).json()
     url = f"/v1/items/{item['id']}/review"
     assert client.post(url, json={"action": "edit", "fields": {}}).json()["status"] == "approved"
-    chosen = client.post(
+    changed = client.post(
         url, json={"action": "choose", "choice": "unsure", "fields": {"family": None}}
     )
+    assert changed.status_code == 422  # a choice cannot carry corrections
+    chosen = client.post(url, json={"action": "choose", "choice": "unsure", "fields": {}})
     assert chosen.status_code == 200
     review = client.get(f"/v1/items/{item['id']}").json()["reviews"][-1]
     assert review["choice"] == "unsure"
-    assert review["field_diff"] == {"family": {"from": "drums", "to": None}}
+    assert review["field_diff"] == {} and review["fields"]["family"] == "drums"
 
 
 def test_fields_rejected_without_schema_and_legacy_edit_unchanged(store):

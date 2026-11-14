@@ -239,6 +239,7 @@ function App() {
       return;
     }
     if (withFields && action === "approve" && changed.length) action = "edit";
+    if (withFields && action === "choose" && changed.length) return; // server rejects it
     let corrected: Json = draft;
     if (
       action === "edit" &&
@@ -662,9 +663,15 @@ function App() {
                   </label>
                   {!!item.options?.length && (
                     <div className="actions" aria-label="Choices">
+                      {changed.length > 0 && (
+                        <p className="muted choice-hint">
+                          Save or reset the label corrections to pick a choice.
+                        </p>
+                      )}
                       {item.options.map((option, i) => (
                         <button
                           key={i}
+                          disabled={changed.length > 0}
                           onClick={() => void submit("choose", option)}
                         >
                           Choose {pretty(option)}

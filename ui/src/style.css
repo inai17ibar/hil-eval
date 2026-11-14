@@ -657,3 +657,8 @@ del {
     min-height: 46px;
   }
 }
+.choice-hint {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 13px;
+}
