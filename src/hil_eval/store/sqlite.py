@@ -69,8 +69,16 @@ def _review_from_data(data: dict) -> Review:
 
 
 def _project_from_row(row) -> ProjectConfig:
-    *head, fields = row
-    return ProjectConfig(*head, json.loads(fields) if fields else None)
+    name, threshold, target_miss_rate, audit_rate, webhook_url, webhook_secret, fields = row
+    return ProjectConfig(
+        name,
+        threshold,
+        target_miss_rate,
+        audit_rate,
+        webhook_url,
+        webhook_secret,
+        json.loads(fields) if fields else None,
+    )
 
 
 def _threshold_history_from_data(data: dict) -> ThresholdHistory:

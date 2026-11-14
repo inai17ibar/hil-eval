@@ -47,7 +47,7 @@ def require_pyarrow() -> None:
         raise ImportError(HF_INSTALL_HINT) from exc
 
 
-def _resolve_assets(value: Any, refs: dict[str, Any], store: Store) -> Any:
+def _resolve_assets(value: Any, refs: dict[Any, Any], store: Store) -> Any:
     """Expand ``{"$asset": sha}`` markers into self-describing references.
 
     Path-reference markers (``{"$asset_path": "/abs/file.wav"}``) stay path
@@ -159,6 +159,7 @@ def export_items(
                 for asset in item.assets:
                     if (
                         asset.kind == AssetKind.path
+                        or asset.sha256 is None
                         or asset.role != AssetRole.input
                         or not asset.mime.startswith("image/")
                     ):
@@ -220,7 +221,11 @@ def export_hf(
         if include_images and item is not None:
             for asset in sorted(item.assets, key=lambda a: a.order):
                 # Path references are exported as paths (inside input/output), never read.
-                if asset.kind == AssetKind.path or not asset.mime.startswith(("image/", "audio/")):
+                if (
+                    asset.kind == AssetKind.path
+                    or asset.sha256 is None
+                    or not asset.mime.startswith(("image/", "audio/"))
+                ):
                     continue
                 blob = store.get_blob_path(asset.sha256)
                 if blob is None:

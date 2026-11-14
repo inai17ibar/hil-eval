@@ -363,7 +363,7 @@ if app is not None:
             try:
                 schema = (
                     None
-                    if clear
+                    if clear or set_file is None
                     else normalize_fields(json.loads(set_file.read_text(encoding="utf-8")))
                 )
             except (ValueError, FieldError) as exc:
