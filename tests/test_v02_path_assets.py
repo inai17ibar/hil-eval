@@ -247,3 +247,47 @@ def test_cli_serve_passes_asset_roots(monkeypatch, tmp_path, library):
     assert result.exit_code == 0, result.output
     assert captured["roots"] == [str(library), str(tmp_path / "nowhere")]
     assert "not a directory" in result.output
+
+
+def test_http_asset_paths_survive_every_export(store, tmp_path):
+    client = TestClient(create_app(store))
+    item = client.post(
+        "/v1/items",
+        json={
+            "project": "p",
+            "input": "x",
+            "output": "y",
+            "asset_paths": [
+                {"path": "/Volumes/X/a.wav"},
+                {"path": "/Volumes/X/b.png", "role": "output"},
+            ],
+        },
+    ).json()
+    client.post(f"/v1/items/{item['id']}/review", json={"action": "approve"})
+    expected = [
+        {
+            "path": "/Volumes/X/a.wav",
+            "role": "input",
+            "mime": "audio/wav",
+            "filename": "a.wav",
+            "order": 0,
+        },
+        {
+            "path": "/Volumes/X/b.png",
+            "role": "output",
+            "mime": "image/png",
+            "filename": "b.png",
+            "order": 0,
+        },
+    ]
+    [record] = export_items(store, "p")
+    assert record["path_assets"] == expected
+    assert (
+        export_items(store, "p", fmt="eval-set").__next__()["metadata"]["path_assets"] == expected
+    )
+    assert (
+        export_items(store, "p", fmt="openai-ft").__next__()["metadata"]["path_assets"] == expected
+    )
+    out = tmp_path / "p.parquet"
+    assert export_hf(store, "p", out) == 1
+    assert pq.read_table(out).to_pylist()[0]["path_assets"] == expected

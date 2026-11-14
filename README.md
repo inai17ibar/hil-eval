@@ -296,7 +296,8 @@ outside a root, are refused (403); allowed but absent files return 404 and the U
 shows "File not found on this machine" with the recorded path. Item responses
 report each asset's `kind` (`blob`/`path`), `source_path` and `availability`.
 Exports keep path assets as references (`{"$asset_path": ..., "kind": "path",
-"path": ...}`); `hf` and `openai-ft` never read them. Over HTTP use
+"path": ...}`) and every record lists all of them in `path_assets` (including
+ones attached over HTTP); `hf` and `openai-ft` never read them. Over HTTP use
 `asset_paths: [{"path": "/abs/file.wav"}]` in `POST /v1/items`.
 
 ## Bulk import

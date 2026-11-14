@@ -538,7 +538,7 @@ function App() {
                   <h2>Assets</h2>
                   <div className="assets">
                     {item.assets.map((asset, index) => (
-                      <figure key={`${asset.sha256}-${index}`}>
+                      <figure key={`${asset.url}-${index}`}>
                         <AssetPreview asset={asset} />
                         <figcaption>
                           {asset.filename ? `${asset.filename} · ` : ""}

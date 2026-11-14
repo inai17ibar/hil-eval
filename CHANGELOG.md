@@ -12,7 +12,7 @@
 - `ReviewRequest.fields`; reviews store `fields` (full corrected dict) and
   `field_diff` (`{name: {from, to}}`) and merge values into `corrected_output`.
   Items expose `fields`, `proposed_fields` and `external_id`.
-- All export formats include `external_id`, `fields` and `field_diff`.
+- All export formats include `external_id`, `fields`, `field_diff` and `path_assets`.
 - Options can be combined with field corrections: with `fields`, the action is
   derived from the diff and `choice` is stored as a verdict flag (e.g. `unsure`);
   the UI shows options as "Mark" chips next to the save button (key `?`).

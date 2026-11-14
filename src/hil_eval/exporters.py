@@ -126,6 +126,19 @@ def export_items(
             "external_id": item.external_id,
             "fields": review.fields,
             "field_diff": review.field_diff,
+            # Every path-reference asset, including ones attached over HTTP
+            # (asset_paths) that have no $asset_path marker in input/output.
+            "path_assets": [
+                {
+                    "path": a.path,
+                    "role": a.role.value,
+                    "mime": a.mime,
+                    "filename": a.filename,
+                    "order": a.order,
+                }
+                for a in item.assets
+                if a.kind == AssetKind.path
+            ],
         }
         if fmt in ("jsonl", "eval-set"):
             refs = {
@@ -265,6 +278,7 @@ def export_hf(
             "external_id",
             "fields",
             "field_diff",
+            "path_assets",
             "fn_name",
             "input",
             "output",

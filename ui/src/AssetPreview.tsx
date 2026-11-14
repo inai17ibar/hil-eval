@@ -27,7 +27,9 @@ export function AssetPreview({ asset }: { asset: Asset }) {
     width: asset.width ?? 0,
     height: asset.height ?? 0,
   });
-  const [failed, setFailed] = useState(false);
+  // Keyed by URL so a failure never leaks to the next item's asset.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const failed = failedUrl === asset.url;
   if (asset.availability && asset.availability !== "available")
     return <Unavailable asset={asset} reason={asset.availability} />;
   if (failed && asset.kind === "path")
@@ -40,7 +42,7 @@ export function AssetPreview({ asset }: { asset: Asset }) {
         controls
         preload="metadata"
         src={assetUrl(asset)}
-        onError={() => setFailed(true)}
+        onError={() => setFailedUrl(asset.url)}
         onLoadedMetadata={(e) => {
           if (asset.video_ts !== null)
             e.currentTarget.currentTime = Math.min(
