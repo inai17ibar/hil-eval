@@ -13,6 +13,9 @@
   `field_diff` (`{name: {from, to}}`) and merge values into `corrected_output`.
   Items expose `fields`, `proposed_fields` and `external_id`.
 - All export formats include `external_id`, `fields` and `field_diff`.
+- Options can be combined with field corrections: with `fields`, the action is
+  derived from the diff and `choice` is stored as a verdict flag (e.g. `unsure`);
+  the UI shows options as "Mark" chips next to the save button (key `?`).
 - Path-reference assets: `path_assets=` selectors and `asset_paths` in
   `POST /v1/items` record absolute paths without reading files;
   `serve --asset-root` (or `HIL_ASSET_ROOTS`) streams them via

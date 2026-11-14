@@ -249,8 +249,14 @@ corrections. The layout works on a phone (large chips, sticky save bar).
 Reviews submitted with `fields` store `Review.fields` (the full corrected dict)
 and `Review.field_diff` (`{"bpm": {"from": 100, "to": 50}}`), merge the values into
 `corrected_output`, and become `approved` when nothing changed or `corrected`
-otherwise. `choose` can only confirm fields as proposed (the UI disables choices
-while labels are edited); the output must be an object for corrections. Only changed values are validated, so an out-of-schema proposal can
+otherwise (the server derives the action from the diff). Item `options` become
+optional verdict flags shown next to the save button ("Mark: unsure", key `?`):
+the chosen value is stored as `choice` alongside the fields, so "not sure, but I
+corrected it like this" is one review. Options are never interpreted; with fields,
+keep only flags the diff cannot express (`unsure`), since `correct`/`wrong_*`
+follow from `field_diff`. The output must be an object for corrections. Exports
+keep `choice` next to `fields`/`field_diff`; `openai-ft` includes flagged samples
+(filter on `metadata.choice` to drop them). Only changed values are validated, so an out-of-schema proposal can
 still be confirmed. Every export format carries `external_id`, `fields` and
 `field_diff`, so building an overrides table is a one-liner:
 

@@ -14,11 +14,31 @@ dotted `path`. A review may carry `fields`; the server (not the client) computes
 `Review.fields` (all values) and `Review.field_diff` (changed only), validates
 only changed values (plus children of a changed parent) so that out-of-schema
 proposals can be confirmed, and writes the values into `corrected_output`.
-`edit` without changes is stored as `approve`; `approve` or `choose` with
-changes is rejected (a choice only confirms the proposed fields, so exports never
-disagree with the stored values); fields always win over an explicitly supplied
-`corrected_output`, and outputs that cannot hold the values (non-objects) get 422. No new `ReviewAction` was added, so status mapping, tuning and old
-clients are unchanged. Store protocol gains `set_project_fields`.
+Rule for actions and options (v0.2, revised): when a review carries
+`fields`, the requested action among approve/edit/choose is not trusted; the
+server derives it from the diff -- `approve` (status approved) when nothing
+changed, `edit` (status corrected, values merged into `corrected_output`) when
+something changed or a `corrected_output` was supplied. `reject`/`skip` cannot
+carry fields. `choice` is an orthogonal verdict flag: it must be one of the item's
+options (when it has any) and is stored verbatim next to `fields`/`field_diff`,
+so "not sure, but I corrected it like this" is one review (choice `unsure`,
+action `edit`). hil-eval never interprets option values: verdicts such as
+`correct` or `wrong_instrument` are derivable from `field_diff` (empty means the
+proposal was confirmed; the keys name the wrong attributes), so for structured
+items projects should keep only flags the diff cannot express (e.g. `unsure`).
+They are still accepted if present -- the simplest rule is "no option is
+special" -- and consumers decide how to treat contradictory combinations.
+Without `fields`, choice reviews behave as in v0.1 (action `choose`, exported
+expected value = the choice). Fields always win over an explicitly supplied
+`corrected_output`, and outputs that cannot hold the values (non-objects) get 422.
+
+Exports keep both: jsonl/eval-set carry `choice`, `fields`, `field_diff` and the
+field-merged `corrected_output`/`expected`; openai-ft trains on the field-merged
+output and keeps `choice` in `metadata` (flagged samples are included; filter on
+`metadata.choice` if you do not want to train on them); hf has `choice`,
+`fields`, `field_diff` columns.
+
+Store protocol gains `set_project_fields`.
 
 Path-reference assets are `AssetRef(kind="path", sha256=None, path=<abs path>)`
 with `{"$asset_path": path}` markers. They are never read when recorded. The
