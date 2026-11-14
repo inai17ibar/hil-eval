@@ -60,6 +60,7 @@ export function AssetPreview({ asset }: { asset: Asset }) {
         src={assetUrl(asset)}
         alt={`${asset.role} asset`}
         loading="lazy"
+        onError={() => setFailedUrl(asset.url)}
         onLoad={(e) =>
           setSize({
             width: e.currentTarget.naturalWidth,
