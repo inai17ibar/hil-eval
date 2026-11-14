@@ -38,6 +38,16 @@ test("every endpoint serializes its request and returns its response", async () 
     await check(() => c.getTagThreshold("p"), "/v1/projects/p/threshold");
     const threshold = { tag_key: "model", tag_value: "v1", threshold: 0.6 };
     await check(() => c.setTagThreshold("p", threshold), "/v1/projects/p/threshold", "PUT", threshold);
+    const fields = [{ name: "family", kind: "enum" as const, choices: ["drums"] }, { name: "bpm", kind: "number" as const, min: 40 }];
+    await check(() => c.getFields("a/b"), "/v1/projects/a%2Fb/fields");
+    await check(() => c.setFields("p", fields), "/v1/projects/p/fields", "PUT", { fields });
+    await check(() => c.setFields("p", null), "/v1/projects/p/fields", "PUT", { fields: null });
+    const pathItem = { project: "p", input: "x", output: { family: "drums" }, fields, external_id: "f1", asset_paths: [{ path: "/Volumes/Extreme SSD/a.wav" }] };
+    await check(() => c.createItem(pathItem), "/v1/items", "POST", pathItem);
+    const labelReview = { action: "edit" as const, fields: { family: "keys", bpm: 50 } };
+    await check(() => c.reviewItem("i", labelReview), "/v1/items/i/review", "POST", labelReview);
+    assert.ok(await c.getItemAsset("a/b", 2) instanceof ArrayBuffer);
+    assert.equal(last!.url, "http://example.test/v1/items/a%2Fb/assets/2");
     assert.ok(await c.getBlob("abc") instanceof ArrayBuffer);
     assert.equal(last!.url, "http://example.test/v1/blobs/abc");
     globalThis.fetch = async () => new Response("denied", { status: 401 });

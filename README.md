@@ -211,16 +211,26 @@ import hil_eval as hil
 
 FIELDS = [
     {"name": "family", "choices": ["drums", "keys", "bass", "synth"]},
-    {"name": "leaf", "label": "Instrument", "depends_on": "family",
-     "choices": {"drums": ["kick", "snare", "top"], "keys": ["piano", "rhodes"]}},
+    {
+        "name": "leaf",
+        "label": "Instrument",
+        "depends_on": "family",
+        "choices": {"drums": ["kick", "snare", "top"], "keys": ["piano", "rhodes"]},
+    },
     {"name": "type", "choices": ["loop", "one_shot"]},
-    {"name": "bpm", "kind": "number", "min": 40, "max": 240, "integer": True,
-     "multipliers": [0.5, 2]},
+    {
+        "name": "bpm",
+        "kind": "number",
+        "min": 40,
+        "max": 240,
+        "integer": True,
+        "multipliers": [0.5, 2],
+    },
     {"name": "key", "kind": "text", "path": "meta.key"},  # dotted path into output
 ]
-hil.init("soundai-labels", fields=FIELDS)          # project-wide schema
-hil.submit(input, output, fields=FIELDS)          # or per item
-@hil.review(judge=..., fields=FIELDS)              # or per decorated function
+hil.init("soundai-labels", fields=FIELDS)  # project-wide schema
+hil.submit(input, output, fields=FIELDS)  # or per item
+# @hil.review(judge=judge, fields=FIELDS)         # or per decorated function
 ```
 
 Field kinds are `enum` (`choices`, optional `depends_on` hierarchy,
@@ -244,8 +254,11 @@ still be confirmed. Every export format carries `external_id`, `fields` and
 `field_diff`, so building an overrides table is a one-liner:
 
 ```python
-overrides = {r["external_id"]: {k: v["to"] for k, v in r["field_diff"].items()}
-             for r in hil.export(statuses=["corrected"]) if r["field_diff"]}
+overrides = {
+    r["external_id"]: {k: v["to"] for k, v in r["field_diff"].items()}
+    for r in hil.export(statuses=["corrected"])
+    if r["field_diff"]
+}
 ```
 
 ![Label correction on an iPhone](docs/screenshots/label-review-iphone.png)
@@ -257,8 +270,9 @@ only. Nothing is read, hashed or copied at enqueue time, so items can be created
 on a machine that does not have the files:
 
 ```python
-hil.submit({"audio": "/Volumes/Extreme SSD/Splice/kick.wav"}, output,
-           path_assets="input.audio")             # also on @hil.review(path_assets=...)
+hil.submit(
+    {"audio": "/Volumes/Extreme SSD/Splice/kick.wav"}, output, path_assets="input.audio"
+)  # also on @hil.review(path_assets=...)
 ```
 
 The machine that has the files serves them, but only from directories you allow
