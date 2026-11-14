@@ -28,7 +28,8 @@ def test_response_contracts(tmp_path):
     }.items():
         assert set(fields) <= set(schemas[name]["required"])
     for path, methods in spec["paths"].items():
-        if path.startswith("/v1/") and "blobs" not in path:
+        binary = "blobs" in path or path.endswith("/assets/{index}")
+        if path.startswith("/v1/") and not binary:
             for operation in methods.values():
                 for code, response in operation["responses"].items():
                     if code.startswith("2") and code != "204":

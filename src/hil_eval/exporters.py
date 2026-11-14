@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .store.base import Store
-from .types import AssetRole, ReviewAction, Status
+from .types import AssetKind, AssetRole, ReviewAction, Status
 
 
 def _text(value: Any) -> str:
@@ -28,7 +28,7 @@ def _without_assets(value: Any) -> Any:
 
 
 def _asset_ref(value: Any) -> bool:
-    return isinstance(value, dict) and "$asset" in value
+    return isinstance(value, dict) and ("$asset" in value or "$asset_path" in value)
 
 
 HF_INSTALL_HINT = (
@@ -48,14 +48,31 @@ def require_pyarrow() -> None:
 
 
 def _resolve_assets(value: Any, refs: dict[str, Any], store: Store) -> Any:
-    """Expand ``{"$asset": sha}`` markers into self-describing references."""
+    """Expand ``{"$asset": sha}`` markers into self-describing references.
+
+    Path-reference markers (``{"$asset_path": "/abs/file.wav"}``) stay path
+    references: ``kind="path"`` with the recorded absolute ``path`` and no bytes.
+    """
     if isinstance(value, dict):
+        source = value.get("$asset_path")
+        if isinstance(source, str):
+            ref = refs.get(("path", source))
+            return {
+                **value,
+                "kind": "path",
+                "sha256": None,
+                "mime": ref.mime if ref is not None else None,
+                "filename": value.get("filename"),
+                "path": source,
+                "url": None,
+            }
         sha = value.get("$asset")
         if isinstance(sha, str):
             ref = refs.get(sha)
             path = store.get_blob_path(sha)
             return {
                 **value,
+                "kind": "blob",
                 "sha256": sha,
                 "mime": ref.mime if ref is not None else None,
                 "filename": value.get("filename"),
@@ -79,7 +96,10 @@ def export_items(
     """Export selected statuses; missing image blobs raise rather than lose data.
 
     jsonl and eval-set expand ``{"$asset": sha}`` markers with sha256, mime,
-    filename, local blob path and the server's blob URL.
+    filename, local blob path and the server's blob URL; path-reference assets
+    are exported as ``kind="path"`` with their recorded path.
+    Every format's metadata carries ``external_id``, the reviewed structured
+    ``fields`` (full corrected dict) and ``field_diff`` (``{name: {from, to}}``).
     """
     if fmt == "hf":
         raise ValueError("format 'hf' writes Parquet; use hil.export_to(path, format='hf')")
@@ -103,9 +123,14 @@ def export_items(
             "reason_codes": review.reason_codes,
             "reason_text": review.reason_text,
             "choice": review.choice,
+            "external_id": item.external_id,
+            "fields": review.fields,
+            "field_diff": review.field_diff,
         }
         if fmt in ("jsonl", "eval-set"):
-            refs = {a.sha256: a for a in item.assets}
+            refs = {
+                (("path", a.path) if a.kind == AssetKind.path else a.sha256): a for a in item.assets
+            }
 
             def resolve(value, refs=refs):
                 return _resolve_assets(value, refs, store)
@@ -132,7 +157,11 @@ def export_items(
             ]
             if include_images:
                 for asset in item.assets:
-                    if asset.role != AssetRole.input or not asset.mime.startswith("image/"):
+                    if (
+                        asset.kind == AssetKind.path
+                        or asset.role != AssetRole.input
+                        or not asset.mime.startswith("image/")
+                    ):
                         continue
                     path = store.get_blob_path(asset.sha256)
                     if path is None:
@@ -190,7 +219,8 @@ def export_hf(
         audio_blobs = []
         if include_images and item is not None:
             for asset in sorted(item.assets, key=lambda a: a.order):
-                if not asset.mime.startswith(("image/", "audio/")):
+                # Path references are exported as paths (inside input/output), never read.
+                if asset.kind == AssetKind.path or not asset.mime.startswith(("image/", "audio/")):
                     continue
                 blob = store.get_blob_path(asset.sha256)
                 if blob is None:
@@ -227,6 +257,9 @@ def export_hf(
             "reason_codes",
             "reason_text",
             "choice",
+            "external_id",
+            "fields",
+            "field_diff",
             "fn_name",
             "input",
             "output",

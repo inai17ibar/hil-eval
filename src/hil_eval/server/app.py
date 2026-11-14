@@ -19,9 +19,11 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from ..blobs import detect_mime, sniff_mime
+from ..blobs import detect_mime, path_asset, resolve_path_asset, sniff_mime
+from ..fields import FieldError, apply_values, check_values, normalize_fields, proposed_values
 from ..store import ItemNotFoundError, ItemSupersededError
 from ..types import (
+    AssetKind,
     AssetRef,
     AssetRole,
     Item,
@@ -38,7 +40,19 @@ from ..types import (
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
-def _serialize_asset(asset: AssetRef) -> dict:
+def _serialize_asset(
+    asset: AssetRef, item_id: str = "", index: int = 0, asset_roots=(), store=None
+) -> dict:
+    if asset.kind == AssetKind.path:
+        url = f"/v1/items/{item_id}/assets/{index}"
+        availability = resolve_path_asset(asset.path, asset_roots)[0]
+    else:
+        url = f"/v1/blobs/{asset.sha256}"
+        availability = (
+            "available"
+            if store is None or store.get_blob_path(asset.sha256) is not None
+            else "missing"
+        )
     return {
         "sha256": asset.sha256,
         "role": asset.role.value,
@@ -48,11 +62,23 @@ def _serialize_asset(asset: AssetRef) -> dict:
         "bbox": asset.bbox,
         "width": asset.width,
         "height": asset.height,
-        "url": f"/v1/blobs/{asset.sha256}",
+        "url": url,
+        "kind": asset.kind.value,
+        "source_path": asset.path if asset.kind == AssetKind.path else None,
+        "filename": asset.filename,
+        "availability": availability,
     }
 
 
-def _serialize_item(item: Item, *, reviews: list[Review] | None = None) -> dict:
+def _serialize_item(
+    item: Item,
+    *,
+    reviews: list[Review] | None = None,
+    project_fields: list[dict] | None = None,
+    asset_roots=(),
+    store=None,
+) -> dict:
+    fields = item.fields if item.fields is not None else project_fields
     data = {
         "id": item.id,
         "project": item.project,
@@ -68,9 +94,14 @@ def _serialize_item(item: Item, *, reviews: list[Review] | None = None) -> dict:
         "tags": item.tags,
         "trace_id": item.trace_id,
         "created_at": item.created_at.isoformat(),
-        "assets": [_serialize_asset(a) for a in item.assets],
+        "assets": [
+            _serialize_asset(a, item.id, i, asset_roots, store) for i, a in enumerate(item.assets)
+        ],
         "options": item.options,
         "expires_at": item.expires_at.isoformat() if item.expires_at else None,
+        "fields": fields or None,
+        "proposed_fields": proposed_values(fields, item.output),
+        "external_id": item.external_id,
     }
     if reviews is not None:
         data["reviews"] = [_serialize_review(r) for r in reviews]
@@ -90,6 +121,8 @@ def _serialize_review(review: Review) -> dict:
         "reason_codes": review.reason_codes,
         "reason_text": review.reason_text,
         "created_at": review.created_at.isoformat(),
+        "fields": review.fields,
+        "field_diff": review.field_diff,
     }
 
 
@@ -99,11 +132,12 @@ def _serialize_project(project: ProjectConfig) -> dict:
         "threshold": project.threshold,
         "target_miss_rate": project.target_miss_rate,
         "audit_rate": project.audit_rate,
+        "fields": project.fields,
     }
 
 
 class AssetResponse(BaseModel):
-    sha256: str
+    sha256: str | None
     role: AssetRole
     mime: str
     order: int
@@ -112,6 +146,31 @@ class AssetResponse(BaseModel):
     width: int | None
     height: int | None
     url: str
+    kind: AssetKind
+    source_path: str | None
+    filename: str | None
+    availability: str
+
+
+class FieldDefinition(BaseModel):
+    name: str
+    kind: str = "enum"
+    label: str | None = None
+    path: str | None = None
+    choices: list[str] | dict[str, list[str]] | None = None
+    depends_on: str | None = None
+    allow_custom: bool = False
+    nullable: bool = True
+    min: float | None = None
+    max: float | None = None
+    step: float | None = None
+    integer: bool = False
+    multipliers: list[float] | None = None
+    suggestions: list[str] | None = None
+
+
+class FieldsBody(BaseModel):
+    fields: list[FieldDefinition] | None
 
 
 class ReviewResponse(BaseModel):
@@ -126,6 +185,8 @@ class ReviewResponse(BaseModel):
     reason_codes: list[str]
     reason_text: str | None
     created_at: str
+    fields: dict[str, Any] | None
+    field_diff: dict[str, Any] | None
 
 
 class ItemResponse(BaseModel):
@@ -146,6 +207,9 @@ class ItemResponse(BaseModel):
     assets: list[AssetResponse]
     options: list[Any] | None
     expires_at: str | None
+    fields: list[FieldDefinition] | None
+    proposed_fields: dict[str, Any] | None
+    external_id: str | None
 
 
 class ItemDetailResponse(ItemResponse):
@@ -162,6 +226,7 @@ class ProjectResponse(BaseModel):
     threshold: float | None
     target_miss_rate: float
     audit_rate: float
+    fields: list[FieldDefinition] | None
 
 
 class ReasonCodeResponse(BaseModel):
@@ -210,6 +275,14 @@ class AssetUpload(BaseModel):
         return value
 
 
+class AssetPathRef(BaseModel):
+    """Reference a file by absolute path; never read or uploaded at create time."""
+
+    path: str
+    role: AssetRole = AssetRole.input
+    mime: str | None = None
+
+
 class SupersedeRequest(BaseModel):
     project: str
     trace_id: str | None = None
@@ -255,6 +328,9 @@ class CreateItemRequest(BaseModel):
     options: list[Any] | None = None
     expires_at: datetime | None = None
     assets: list[AssetUpload] | None = None
+    asset_paths: list[AssetPathRef] | None = None
+    fields: list[FieldDefinition] | None = None
+    external_id: str | None = Field(default=None, min_length=1)
 
     @field_validator("expires_at")
     @classmethod
@@ -278,11 +354,16 @@ class ReviewRequest(BaseModel):
     judge_correct: bool | None = None
     reviewer: str | None = None
     note: str | None = None
+    fields: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _check_corrected_output(self):
-        if self.action == ReviewAction.edit and self.corrected_output is None:
-            raise ValueError("corrected_output is required when action is 'edit'")
+        if (
+            self.action == ReviewAction.edit
+            and self.corrected_output is None
+            and self.fields is None
+        ):
+            raise ValueError("corrected_output or fields is required when action is 'edit'")
         if self.action == ReviewAction.choose and "choice" not in self.model_fields_set:
             raise ValueError("choice is required when action is choose")
         return self
@@ -295,7 +376,10 @@ def create_app(
     *,
     webhook_url: str | None = None,
     webhook_secret: str | None = None,
+    asset_roots: list[str | Path] | tuple[str | Path, ...] = (),
 ) -> FastAPI:
+    """Build the API/UI app. ``asset_roots`` lists directories from which path-reference
+    assets may be streamed (default: none, so path assets are never served)."""
     from ..webhooks import WebhookDispatcher
 
     dispatcher = WebhookDispatcher(webhook_url, webhook_secret)
@@ -310,6 +394,31 @@ def create_app(
 
     app = FastAPI(title="hil-eval", lifespan=lifespan)
     app.state.webhook_dispatcher = dispatcher
+    roots = tuple(str(r) for r in asset_roots)
+
+    def effective_fields(item: Item, cache: dict | None = None):
+        if item.fields is not None:
+            return item.fields
+        if cache is not None and item.project in cache:
+            return cache[item.project]
+        try:
+            project = store.get_project(item.project)
+        except Exception:  # serialization must not fail on a config lookup
+            logging.getLogger("hil_eval").exception("Project field lookup failed")
+            return None
+        fields = project.fields if project is not None else None
+        if cache is not None:
+            cache[item.project] = fields
+        return fields
+
+    def serialize(item: Item, *, reviews=None, cache=None):
+        return _serialize_item(
+            item,
+            reviews=reviews,
+            project_fields=effective_fields(item, cache),
+            asset_roots=roots,
+            store=store,
+        )
 
     def _key_matches(provided: str | None) -> bool:
         return (
@@ -375,7 +484,8 @@ def create_app(
             exclude_expired=not include_expired,
             now=now,
         )
-        return {"items": [_serialize_item(i) for i in items], "total": total}
+        cache: dict = {}
+        return {"items": [serialize(i, cache=cache) for i in items], "total": total}
 
     @app.post(
         "/v1/items/supersede",
@@ -438,7 +548,7 @@ def create_app(
         item = store.get_item(item_id)
         if item is None:
             raise HTTPException(status_code=404, detail="item not found")
-        return _serialize_item(item, reviews=store.list_reviews(item_id))
+        return serialize(item, reviews=store.list_reviews(item_id))
 
     @app.post(
         "/v1/items",
@@ -448,6 +558,14 @@ def create_app(
     )
     def create_item(body: CreateItemRequest):
         store.ensure_project(body.project, threshold=None, target_miss_rate=None, audit_rate=None)
+        try:
+            fields = normalize_fields(
+                [f.model_dump(exclude_none=True) for f in body.fields]
+                if body.fields is not None
+                else None
+            )
+        except FieldError as exc:
+            raise HTTPException(422, str(exc)) from exc
         item = Item(
             id=uuid4().hex,
             project=body.project,
@@ -466,6 +584,8 @@ def create_app(
             assets=[],
             options=body.options,
             expires_at=body.expires_at,
+            fields=fields,
+            external_id=body.external_id,
         )
         for order, upload in enumerate(body.assets or []):
             data = base64.b64decode(upload.data_base64, validate=True)
@@ -482,7 +602,19 @@ def create_app(
                     bbox=upload.bbox,
                 )
             )
-        result = _serialize_item(store.save_item(item))
+        counters: dict = {}
+        for asset in item.assets:
+            counters[asset.role] = max(counters.get(asset.role, 0), asset.order + 1)
+        for ref in body.asset_paths or []:
+            try:
+                asset = path_asset(ref.path, role=ref.role, order=counters.get(ref.role, 0))
+            except (TypeError, ValueError, NotImplementedError) as exc:
+                raise HTTPException(422, f"invalid asset path: {exc}") from exc
+            if ref.mime:
+                asset.mime = ref.mime
+            counters[ref.role] = asset.order + 1
+            item.assets.append(asset)
+        result = serialize(store.save_item(item))
         emit("item.created", item.project, result)
         return result
 
@@ -506,18 +638,39 @@ def create_app(
         registered = {r.code for r in store.list_reason_codes(item.project)}
         if registered and set(body.reason_codes) - registered:
             raise HTTPException(422, "unknown reason code")
+        action = body.action
+        corrected_output = body.corrected_output
+        corrected_fields = diff = None
+        if body.fields is not None:
+            schema = effective_fields(item)
+            if not schema:
+                raise HTTPException(422, "item has no field schema")
+            if action not in (ReviewAction.approve, ReviewAction.edit, ReviewAction.choose):
+                raise HTTPException(422, "fields are only accepted with approve, edit or choose")
+            try:
+                corrected_fields, diff = check_values(schema, item.output, body.fields)
+            except FieldError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            if action == ReviewAction.approve and diff:
+                raise HTTPException(422, "approve cannot change fields; use action 'edit'")
+            if action == ReviewAction.edit and not diff and corrected_output is None:
+                action = ReviewAction.approve  # nothing changed: record a confirmation
+            elif action == ReviewAction.edit and corrected_output is None:
+                corrected_output = apply_values(schema, item.output, corrected_fields)
         review = Review(
             id=uuid4().hex,
             item_id=item_id,
             reviewer=body.reviewer,
-            action=body.action,
-            corrected_output=body.corrected_output,
+            action=action,
+            corrected_output=corrected_output,
             judge_correct=body.judge_correct,
             note=body.note,
             choice=body.choice,
             reason_codes=body.reason_codes,
             reason_text=body.reason_text,
             created_at=datetime.now(timezone.utc),
+            fields=corrected_fields,
+            field_diff=diff,
         )
         try:
             store.save_review(review)
@@ -526,7 +679,70 @@ def create_app(
         except ItemNotFoundError as exc:
             raise HTTPException(status_code=404, detail="item not found") from exc
         emit("review.created", item.project, _serialize_review(review))
-        return _serialize_item(store.get_item(item_id))
+        return serialize(store.get_item(item_id))
+
+    @app.get(
+        "/v1/projects/{project}/fields",
+        response_model=FieldsBody,
+        dependencies=[Depends(require_api_key)],
+    )
+    def get_fields(project: str):
+        config = store.get_project(project)
+        if config is None:
+            raise HTTPException(404, "project not found")
+        return {"fields": config.fields}
+
+    @app.put(
+        "/v1/projects/{project}/fields",
+        response_model=FieldsBody,
+        dependencies=[Depends(require_api_key)],
+    )
+    def put_fields(project: str, body: FieldsBody):
+        try:
+            fields = normalize_fields(
+                [f.model_dump(exclude_none=True) for f in body.fields]
+                if body.fields is not None
+                else None
+            )
+        except FieldError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        store.ensure_project(project, threshold=None, target_miss_rate=None, audit_rate=None)
+        store.set_project_fields(project, fields)
+        return {"fields": fields}
+
+    @app.get(
+        "/v1/items/{item_id}/assets/{index}",
+        dependencies=[Depends(require_api_key_header_or_query)],
+        response_class=Response,
+        responses={
+            200: {
+                "description": "Asset bytes (HTTP Range supported)",
+                "content": {"application/octet-stream": {}},
+            },
+            403: {"description": "Path is outside the configured --asset-root directories"},
+            404: {"description": "Item, asset or file not found on this machine"},
+        },
+    )
+    def get_item_asset(item_id: str, index: int):
+        item = store.get_item(item_id)
+        if item is None or not 0 <= index < len(item.assets):
+            raise HTTPException(404, "asset not found")
+        asset = item.assets[index]
+        if asset.kind == AssetKind.path:
+            status, real = resolve_path_asset(asset.path, roots)
+            if status == "not_allowed":
+                raise HTTPException(
+                    403,
+                    "path is outside the allowed asset roots "
+                    "(start the server with --asset-root DIR)",
+                )
+            if real is None:
+                raise HTTPException(404, "file not found on this machine")
+            return FileResponse(real, media_type=asset.mime, filename=None)
+        path = store.get_blob_path(asset.sha256)
+        if path is None:
+            raise HTTPException(404, "blob not found")
+        return FileResponse(path, media_type=asset.mime)
 
     @app.get("/v1/blobs/{sha256}", dependencies=[Depends(require_api_key_header_or_query)])
     def get_blob(sha256: str):

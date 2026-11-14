@@ -1,7 +1,35 @@
 components:
   schemas:
+    AssetKind:
+      enum:
+      - blob
+      - path
+      title: AssetKind
+      type: string
+    AssetPathRef:
+      description: Reference a file by absolute path; never read or uploaded at create
+        time.
+      properties:
+        mime:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Mime
+        path:
+          title: Path
+          type: string
+        role:
+          $ref: '#/components/schemas/AssetRole'
+          default: input
+      required:
+      - path
+      title: AssetPathRef
+      type: object
     AssetResponse:
       properties:
+        availability:
+          title: Availability
+          type: string
         bbox:
           anyOf:
           - maxItems: 4
@@ -14,11 +42,18 @@ components:
             type: array
           - type: 'null'
           title: Bbox
+        filename:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Filename
         height:
           anyOf:
           - type: integer
           - type: 'null'
           title: Height
+        kind:
+          $ref: '#/components/schemas/AssetKind'
         mime:
           title: Mime
           type: string
@@ -28,8 +63,15 @@ components:
         role:
           $ref: '#/components/schemas/AssetRole'
         sha256:
+          anyOf:
+          - type: string
+          - type: 'null'
           title: Sha256
-          type: string
+        source_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Path
         url:
           title: Url
           type: string
@@ -53,6 +95,10 @@ components:
       - width
       - height
       - url
+      - kind
+      - source_path
+      - filename
+      - availability
       title: AssetResponse
       type: object
     AssetRole:
@@ -99,6 +145,13 @@ components:
       type: object
     CreateItemRequest:
       properties:
+        asset_paths:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/AssetPathRef'
+            type: array
+          - type: 'null'
+          title: Asset Paths
         assets:
           anyOf:
           - items:
@@ -117,6 +170,19 @@ components:
             type: string
           - type: 'null'
           title: Expires At
+        external_id:
+          anyOf:
+          - minLength: 1
+            type: string
+          - type: 'null'
+          title: External Id
+        fields:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/FieldDefinition'
+            type: array
+          - type: 'null'
+          title: Fields
         fn_name:
           anyOf:
           - type: string
@@ -163,6 +229,100 @@ components:
       - output
       title: CreateItemRequest
       type: object
+    FieldDefinition:
+      properties:
+        allow_custom:
+          default: false
+          title: Allow Custom
+          type: boolean
+        choices:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - additionalProperties:
+              items:
+                type: string
+              type: array
+            type: object
+          - type: 'null'
+          title: Choices
+        depends_on:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Depends On
+        integer:
+          default: false
+          title: Integer
+          type: boolean
+        kind:
+          default: enum
+          title: Kind
+          type: string
+        label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Label
+        max:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Max
+        min:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Min
+        multipliers:
+          anyOf:
+          - items:
+              type: number
+            type: array
+          - type: 'null'
+          title: Multipliers
+        name:
+          title: Name
+          type: string
+        nullable:
+          default: true
+          title: Nullable
+          type: boolean
+        path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Path
+        step:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Step
+        suggestions:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Suggestions
+      required:
+      - name
+      title: FieldDefinition
+      type: object
+    FieldsBody:
+      properties:
+        fields:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/FieldDefinition'
+            type: array
+          - type: 'null'
+          title: Fields
+      required:
+      - fields
+      title: FieldsBody
+      type: object
     HTTPValidationError:
       properties:
         detail:
@@ -201,6 +361,18 @@ components:
           - type: string
           - type: 'null'
           title: Expires At
+        external_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: External Id
+        fields:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/FieldDefinition'
+            type: array
+          - type: 'null'
+          title: Fields
         fn_name:
           anyOf:
           - type: string
@@ -236,6 +408,12 @@ components:
         project:
           title: Project
           type: string
+        proposed_fields:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Proposed Fields
         reviews:
           items:
             $ref: '#/components/schemas/ReviewResponse'
@@ -273,6 +451,9 @@ components:
       - assets
       - options
       - expires_at
+      - fields
+      - proposed_fields
+      - external_id
       - reviews
       title: ItemDetailResponse
       type: object
@@ -296,6 +477,18 @@ components:
           - type: string
           - type: 'null'
           title: Expires At
+        external_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: External Id
+        fields:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/FieldDefinition'
+            type: array
+          - type: 'null'
+          title: Fields
         fn_name:
           anyOf:
           - type: string
@@ -331,6 +524,12 @@ components:
         project:
           title: Project
           type: string
+        proposed_fields:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Proposed Fields
         routed_by:
           $ref: '#/components/schemas/RoutedBy'
         status:
@@ -363,6 +562,9 @@ components:
       - assets
       - options
       - expires_at
+      - fields
+      - proposed_fields
+      - external_id
       title: ItemResponse
       type: object
     ProjectResponse:
@@ -370,6 +572,13 @@ components:
         audit_rate:
           title: Audit Rate
           type: number
+        fields:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/FieldDefinition'
+            type: array
+          - type: 'null'
+          title: Fields
         name:
           title: Name
           type: string
@@ -386,6 +595,7 @@ components:
       - threshold
       - target_miss_rate
       - audit_rate
+      - fields
       title: ProjectResponse
       type: object
     QueueResponse:
@@ -464,6 +674,12 @@ components:
           title: Choice
         corrected_output:
           title: Corrected Output
+        fields:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Fields
         judge_correct:
           anyOf:
           - type: boolean
@@ -504,6 +720,18 @@ components:
         created_at:
           title: Created At
           type: string
+        field_diff:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Field Diff
+        fields:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Fields
         id:
           title: Id
           type: string
@@ -547,6 +775,8 @@ components:
       - reason_codes
       - reason_text
       - created_at
+      - fields
+      - field_diff
       title: ReviewResponse
       type: object
     RoutedBy:
@@ -917,6 +1147,54 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
           description: Validation Error
       summary: Get Item
+  /v1/items/{item_id}/assets/{index}:
+    get:
+      operationId: get_item_asset_v1_items__item_id__assets__index__get
+      parameters:
+      - in: path
+        name: item_id
+        required: true
+        schema:
+          title: Item Id
+          type: string
+      - in: path
+        name: index
+        required: true
+        schema:
+          title: Index
+          type: integer
+      - in: query
+        name: api_key
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Api Key
+      - in: header
+        name: x-api-key
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Api-Key
+      responses:
+        '200':
+          content:
+            application/octet-stream: {}
+          description: Asset bytes (HTTP Range supported)
+        '403':
+          description: Path is outside the configured --asset-root directories
+        '404':
+          description: Item, asset or file not found on this machine
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Get Item Asset
   /v1/items/{item_id}/review:
     post:
       operationId: review_item_v1_items__item_id__review_post
@@ -984,6 +1262,75 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
           description: Validation Error
       summary: List Projects
+  /v1/projects/{project}/fields:
+    get:
+      operationId: get_fields_v1_projects__project__fields_get
+      parameters:
+      - in: path
+        name: project
+        required: true
+        schema:
+          title: Project
+          type: string
+      - in: header
+        name: x-api-key
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Api-Key
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FieldsBody'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Get Fields
+    put:
+      operationId: put_fields_v1_projects__project__fields_put
+      parameters:
+      - in: path
+        name: project
+        required: true
+        schema:
+          title: Project
+          type: string
+      - in: header
+        name: x-api-key
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Api-Key
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FieldsBody'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FieldsBody'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Put Fields
   /v1/projects/{project}/reason-codes:
     get:
       operationId: reason_codes_v1_projects__project__reason_codes_get

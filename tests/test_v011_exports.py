@@ -21,6 +21,7 @@ def test_jsonl_export_resolves_assets_and_export_to(store, tmp_path):
     asset = sorted(item.assets, key=lambda a: a.order)[1]
     assert ref == {
         "$asset": asset.sha256,
+        "kind": "blob",
         "sha256": asset.sha256,
         "filename": "s1.wav",
         "mime": "audio/wav",
