@@ -136,8 +136,11 @@ def test_apply_values_writes_nested_paths_without_mutating():
     updated = apply_values(fields, OUTPUT, {"key": "C major", "bpm": 120})
     assert updated["meta"]["key"] == "C major" and updated["bpm"] == 120
     assert OUTPUT["meta"]["key"] == "D minor"
-    assert apply_values(fields, "text", {"bpm": 1}) == "text"
+    with pytest.raises(FieldError, match="object"):
+        apply_values(fields, "text", {"bpm": 1})
     assert apply_values([{"name": "x", "path": "a.b"}], {}, {"x": 1}) == {"a": {"b": 1}}
+    with pytest.raises(FieldError, match="non-object"):
+        apply_values([{"name": "x", "path": "a.b"}], {"a": "keep"}, {"x": 1})
     assert field_diff({"a": True}, {"a": 1}) == {"a": {"from": True, "to": 1}}
 
 
@@ -275,3 +278,25 @@ def test_hf_export_has_field_columns(store, tmp_path):
     empty = tmp_path / "empty.parquet"
     assert export_hf(store, "nobody", empty) == 0
     assert {"fields", "field_diff", "external_id"} <= set(pq.read_table(empty).column_names)
+
+
+def test_fields_win_over_supplied_output_and_bad_shapes_are_rejected(store):
+    client = make_client(store)
+    item = client.post(
+        "/v1/items", json={"project": "p", "input": "a", "output": OUTPUT, "fields": SCHEMA}
+    ).json()
+    url = f"/v1/items/{item['id']}/review"
+    body = {"action": "edit", "fields": {"bpm": 50}, "corrected_output": {"bpm": 100, "x": 1}}
+    assert client.post(url, json=body).status_code == 200
+    review = client.get(f"/v1/items/{item['id']}").json()["reviews"][-1]
+    assert review["corrected_output"]["bpm"] == 50 and review["corrected_output"]["x"] == 1
+    assert review["corrected_output"]["family"] == "drums"
+    for output in ["plain text", [1, 2], None, {"meta": "flat"}]:
+        scalar = client.post(
+            "/v1/items", json={"project": "p", "input": "a", "output": output, "fields": SCHEMA}
+        ).json()
+        url = f"/v1/items/{scalar['id']}/review"
+        # confirming is fine; a correction that cannot be written back is rejected
+        assert client.post(url, json={"action": "edit", "fields": {}}).status_code == 200
+        bad = client.post(url, json={"action": "edit", "fields": {"key": "C major"}})
+        assert bad.status_code == 422, output

@@ -655,8 +655,14 @@ def create_app(
                 raise HTTPException(422, "approve cannot change fields; use action 'edit'")
             if action == ReviewAction.edit and not diff and corrected_output is None:
                 action = ReviewAction.approve  # nothing changed: record a confirmation
-            elif action == ReviewAction.edit and corrected_output is None:
-                corrected_output = apply_values(schema, item.output, corrected_fields)
+            elif action == ReviewAction.edit:
+                # Fields are authoritative: merge them into the item output, or into
+                # an explicitly supplied corrected_output, so exports never disagree.
+                base = item.output if corrected_output is None else corrected_output
+                try:
+                    corrected_output = apply_values(schema, base, corrected_fields)
+                except FieldError as exc:
+                    raise HTTPException(422, str(exc)) from exc
         review = Review(
             id=uuid4().hex,
             item_id=item_id,

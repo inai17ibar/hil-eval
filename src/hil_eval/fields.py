@@ -251,23 +251,28 @@ def check_values(
 
 
 def apply_values(fields: list[dict[str, Any]], output: Any, values: dict[str, Any]) -> Any:
-    """Return a copy of ``output`` with corrected values written at each field path."""
-    if not isinstance(output, dict):
-        return output
+    """Return a copy of ``output`` with values written at each field path.
+
+    Missing intermediate objects are created. Raises :class:`FieldError` when the
+    output (or an intermediate value on a path) is not an object, rather than
+    silently dropping or clobbering data.
+    """
     import copy
 
+    if not isinstance(output, dict):
+        raise FieldError("field corrections need an object (dict) output")
     result = copy.deepcopy(output)
     for spec in fields:
         name = spec["name"]
         if name not in values:
             continue
-        parts = (spec.get("path") or name).split(".")
+        path = spec.get("path") or name
+        parts = path.split(".")
         target = result
         for part in parts[:-1]:
-            child = target.get(part)
+            child = target.setdefault(part, {})
             if not isinstance(child, dict):
-                child = {}
-                target[part] = child
+                raise FieldError(f"field {name!r}: {path!r} crosses a non-object value")
             target = child
         target[parts[-1]] = values[name]
     return result
