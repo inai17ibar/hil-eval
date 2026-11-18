@@ -104,11 +104,10 @@ def export_items(
             "reason_text": review.reason_text,
             "choice": review.choice,
         }
-        if fmt in ("jsonl", "eval-set"):
-            refs = {a.sha256: a for a in item.assets}
+        refs = {a.sha256: a for a in item.assets}
 
-            def resolve(value, refs=refs):
-                return _resolve_assets(value, refs, store)
+        def resolve(value, refs=refs):
+            return _resolve_assets(value, refs, store)
 
         if fmt == "jsonl":
             yield {
